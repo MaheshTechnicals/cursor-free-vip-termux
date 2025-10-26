@@ -4,23 +4,26 @@
 #                 🚀 Cursor AI Editor Installer & Uninstaller 🚀                 #
 #                                                                              #
 #                        ✨ Author: Mahesh Technicals ✨                         #
-#                        🌟 Version: 3.3 (DEB Edition) 🌟                       #
+#                        🌟 Version: 3.6 (DEB Edition) 🌟                       #
 #                📌 Modern & Stylish UI with Error Handling                #
 #                                                                              #
 ################################################################################
 
 # Define variables
 APP_NAME="Cursor"
-APP_VERSION="0.48.6" # Default version, will be updated by fetch_download_urls
+APP_VERSION="0.0.0" # Default version, will be updated by fetch_download_urls
 ARCH=$(uname -m)
 DEB_URL=""
-VERSION_JSON_URL="https://raw.githubusercontent.com/oslook/cursor-ai-downloads/refs/heads/main/version-history.json"
 
-# Initialize default URLs based on architecture (these will be updated later)
+# NEW: API endpoints for fetching version and download URL
+API_URL_BASE="https://www.cursor.com/api/download?releaseTrack=stable"
+API_URL=""
+
+# Set the correct API endpoint based on architecture
 if [[ "$ARCH" == "aarch64" || "$ARCH" == "arm64" ]]; then
-    DEB_URL="https://api2.cursor.sh/updates/download/golden/linux-arm64-deb/cursor/${APP_VERSION}"
+    API_URL="${API_URL_BASE}&platform=linux-arm64"
 elif [[ "$ARCH" == "x86_64" ]]; then
-    DEB_URL="https://api2.cursor.sh/updates/download/golden/linux-x64-deb/cursor/${APP_VERSION}"
+    API_URL="${API_URL_BASE}&platform=linux-x64"
 else
     echo -e "\e[31m[ERROR] Unsupported architecture: $ARCH\e[0m"
     # We'll handle this properly later
@@ -57,7 +60,7 @@ print_box() {
     local content=("$@")
     local max_length=0
     local line_length
-    
+
     # Find the longest line
     for line in "${content[@]}"; do
         line_length=${#line}
@@ -65,47 +68,47 @@ print_box() {
             max_length=$line_length
         fi
     done
-    
+
     # Add padding for box borders
     max_length=$((max_length + 8))
-    
+
     # Create top border
     local top_border="${CYAN}${BOLD}╔"
     for ((i=0; i<max_length-2; i++)); do
         top_border+="═"
     done
     top_border+="╗${RESET}"
-    
+
     # Create bottom border
     local bottom_border="${CYAN}${BOLD}╚"
     for ((i=0; i<max_length-2; i++)); do
         bottom_border+="═"
     done
     bottom_border+="╝${RESET}"
-    
+
     # Print box
     echo -e "$top_border"
-    
+
     for line in "${content[@]}"; do
         local padding=$((max_length - ${#line} - 2))
         local right_padding=$((padding / 2))
         local left_padding=$((padding - right_padding))
-        
+
         local padded_line="${CYAN}${BOLD}║${RESET}"
         for ((i=0; i<left_padding; i++)); do
             padded_line+=" "
         done
-        
+
         padded_line+="$line"
-        
+
         for ((i=0; i<right_padding; i++)); do
             padded_line+=" "
         done
         padded_line+="${CYAN}${BOLD}║${RESET}"
-        
+
         echo -e "$padded_line"
     done
-    
+
     echo -e "$bottom_border"
 }
 
@@ -135,26 +138,26 @@ check_deb_system() {
 # Function to install missing dependencies
 install_dependencies() {
     local missing_deps=("$@")
-    
+
     if [[ ${#missing_deps[@]} -eq 0 ]]; then
         return 0
     fi
-    
+
     print_text "${YELLOW}${BOLD}[INFO] Installing missing dependencies: ${missing_deps[*]}${RESET}"
-    
+
     # This script now ONLY supports apt/apt-get
     if ! check_deb_system; then
         print_text "${RED}${BOLD}[ERROR] Cannot install dependencies on a non-Debian system.${RESET}"
         return 1
     fi
-    
+
     # Try to install dependencies with sudo if we're not already root
     local use_sudo=""
     if [[ $EUID -ne 0 ]]; then
         use_sudo="sudo"
         print_text "${YELLOW}${BOLD}[INFO] Not running as root, will use sudo for installations${RESET}"
     fi
-    
+
     if command -v apt &> /dev/null; then
         print_text "${BLUE}${BOLD}[INFO] Using apt package manager...${RESET}"
         $use_sudo apt update -qq && $use_sudo apt install -y "${missing_deps[@]}"
@@ -162,7 +165,7 @@ install_dependencies() {
         print_text "${BLUE}${BOLD}[INFO] Using apt-get package manager...${RESET}"
         $use_sudo apt-get update -qq && $use_sudo apt-get install -y "${missing_deps[@]}"
     fi
-    
+
     # Verify installation
     local still_missing=()
     for dep in "${missing_deps[@]}"; do
@@ -170,7 +173,7 @@ install_dependencies() {
             still_missing+=("$dep")
         fi
     done
-    
+
     if [[ ${#still_missing[@]} -gt 0 ]]; then
         print_text "${RED}${BOLD}[ERROR] Failed to install some dependencies: ${still_missing[*]}${RESET}"
         print_text "${YELLOW}Please install them manually and run the script again.${RESET}"
@@ -178,21 +181,21 @@ install_dependencies() {
         read -r
         return 1
     fi
-    
+
     print_text "${GREEN}${BOLD}[SUCCESS] All dependencies installed successfully!${RESET}"
-    
+
     # Special verification for jq
     if ! command -v jq &> /dev/null; then
         print_text "${YELLOW}${BOLD}[WARNING] jq still not found after installation attempts.${RESET}"
         print_text "${YELLOW}${BOLD}[INFO] Will try one more alternative method...${RESET}"
-        
+
         if command -v python3 &> /dev/null || command -v python &> /dev/null; then
             if command -v pip &> /dev/null || command -v pip3 &> /dev/null; then
                 print_text "${BLUE}${BOLD}[INFO] Attempting to install jq via pip...${RESET}"
                 $use_sudo pip install jq || $use_sudo pip3 install jq
             fi
         fi
-        
+
         # Final check if jq is available
         if ! command -v jq &> /dev/null; then
             print_text "${YELLOW}${BOLD}[WARNING] Could not install jq automatically.${RESET}"
@@ -202,7 +205,7 @@ install_dependencies() {
             print_text "${GREEN}${BOLD}[SUCCESS] Successfully installed jq using alternative method!${RESET}"
         fi
     fi
-    
+
     return 0
 }
 
@@ -212,34 +215,34 @@ check_dependencies() {
     local optional_deps=("xxd" "python3" "curl")
     local missing_deps=()
     local missing_optional=()
-    
+
     print_text "${YELLOW}${BOLD}[INFO] Checking dependencies...${RESET}"
-    
+
     for dep in "${deps[@]}"; do
         if ! command -v "$dep" &> /dev/null; then
             missing_deps+=("$dep")
         fi
     done
-    
+
     for dep in "${optional_deps[@]}"; do
         if ! command -v "$dep" &> /dev/null; then
             missing_optional+=("$dep")
         fi
     done
-    
+
     if [[ ${#missing_deps[@]} -gt 0 ]]; then
         print_text "${RED}${BOLD}[ERROR] Missing required dependencies: ${missing_deps[*]}${RESET}"
         print_text "${YELLOW}${BOLD}[INFO] Please install them using your package manager.${RESET}"
         print_text "                For Debian/Ubuntu: ${BOLD}apt install ${missing_deps[*]}${RESET}"
         return 1
     fi
-    
+
     if [[ ${#missing_optional[@]} -gt 0 ]]; then
         print_text "${YELLOW}${BOLD}[WARNING] Some optional dependencies are missing: ${missing_optional[*]}${RESET}"
         print_text "${YELLOW}${BOLD}[INFO] These are not required but recommended for better functionality:${RESET}"
         print_text "                For Debian/Ubuntu: ${BOLD}apt install ${missing_optional[*]}${RESET}"
     fi
-    
+
     print_text "${GREEN}${BOLD}[SUCCESS] All required dependencies are satisfied!${RESET}"
     return 0
 }
@@ -250,33 +253,33 @@ check_and_get_missing_dependencies() {
     local optional_deps=("xxd" "python3" "curl")
     local missing_deps=()
     local missing_optional=()
-    
+
     print_text "${YELLOW}${BOLD}[INFO] Checking dependencies...${RESET}"
-    
+
     for dep in "${deps[@]}"; do
         if ! command -v "$dep" &> /dev/null; then
             missing_deps+=("$dep")
         fi
     done
-    
+
     for dep in "${optional_deps[@]}"; do
         if ! command -v "$dep" &> /dev/null; then
             missing_optional+=("$dep")
         fi
     done
-    
+
     if [[ ${#missing_deps[@]} -gt 0 ]]; then
         print_text "${YELLOW}${BOLD}[INFO] Missing required dependencies: ${missing_deps[*]}${RESET}"
         print_text "${BLUE}${BOLD}[INFO] Will attempt to install automatically...${RESET}"
         echo "${missing_deps[@]}"
         return 1
     fi
-    
+
     if [[ ${#missing_optional[@]} -gt 0 ]]; then
         print_text "${YELLOW}${BOLD}[WARNING] Some optional dependencies are missing: ${missing_optional[*]}${RESET}"
         print_text "${YELLOW}${BOLD}[INFO] These are recommended but not required. They will not be installed automatically.${RESET}"
     fi
-    
+
     print_text "${GREEN}${BOLD}[SUCCESS] All required dependencies are satisfied!${RESET}"
     return 0
 }
@@ -290,10 +293,10 @@ display_header() {
         "${CYAN}${BOLD}Installation & Management${RESET}"
         ""
         "${CYAN}${BOLD}by Mahesh Technicals${RESET}"
-        "${CYAN}${BOLD}Version 3.3 (DEB Edition)${RESET}"
+        "${CYAN}${BOLD}Version 3.6 (DEB Edition)${RESET}"
         ""
     )
-    
+
     print_box "${content[@]}"
     echo
 }
@@ -339,9 +342,9 @@ show_spinner() {
     local pid=$1
     local delay=0.1
     local spinstr='⣾⣽⣻⢿⡿⣟⣯⣷'
-    
+
     echo -n ""
-    
+
     while ps -p "$pid" &> /dev/null; do
         local temp=${spinstr#?}
         printf " ${CYAN}${BOLD}[%c]${RESET}  " "$spinstr"
@@ -355,104 +358,87 @@ show_spinner() {
 # Function to fetch latest version and download URLs
 fetch_download_urls() {
     print_text "${YELLOW}${BOLD}[INFO] Fetching latest version information...${RESET}"
-    
+
+    if [[ -z "$API_URL" ]]; then
+        print_text "${RED}${BOLD}[ERROR] Unsupported architecture: $ARCH. Cannot fetch version.${RESET}"
+        return 1
+    fi
+
     # Check if curl or wget is available
     if command -v curl &> /dev/null; then
-        local response=$(curl -s --connect-timeout 10 --max-time 15 "$VERSION_JSON_URL")
+        # FIX: Added -L flag to follow redirects
+        local response=$(curl -sL --connect-timeout 10 --max-time 15 "$API_URL")
     elif command -v wget &> /dev/null; then
-        local response=$(wget --timeout=10 --tries=2 -qO- "$VERSION_JSON_URL")
+        # wget follows redirects by default
+        local response=$(wget --timeout=10 --tries=2 -qO- "$API_URL")
     else
         print_text "${RED}${BOLD}[ERROR] Neither curl nor wget is available. Please install one of them.${RESET}"
-        # Use default values instead of exiting
-        APP_VERSION="0.48.6"
-        if [[ "$ARCH" == "aarch64" || "$ARCH" == "arm64" ]]; then
-            DEB_URL="https://api2.cursor.sh/updates/download/golden/linux-arm64-deb/cursor/${APP_VERSION}"
-        elif [[ "$ARCH" == "x86_64" ]]; then
-            DEB_URL="https://api2.cursor.sh/updates/download/golden/linux-x64-deb/cursor/${APP_VERSION}"
-        else
-            print_text "${RED}${BOLD}[ERROR] Unsupported architecture: $ARCH${RESET}"
-            return 1
-        fi
-        return 0
+        return 1
     fi
-    
+
     # Check if we got a valid response
     if [[ -z "$response" ]]; then
         print_text "${RED}${BOLD}[ERROR] Failed to get a response from version server.${RESET}"
-        print_text "${YELLOW}${BOLD}[INFO] Falling back to default version...${RESET}"
-        APP_VERSION="0.48.6"
-        
-        # Set architecture-specific URL (fallback)
-        if [[ "$ARCH" == "aarch64" || "$ARCH" == "arm64" ]]; then
-            DEB_URL="https://api2.cursor.sh/updates/download/golden/linux-arm64-deb/cursor/${APP_VERSION}"
-        elif [[ "$ARCH" == "x86_64" ]]; then
-            DEB_URL="https://api2.cursor.sh/updates/download/golden/linux-x64-deb/cursor/${APP_VERSION}"
-        fi
-        return 0
+        return 1
     fi
-    
+
     # Check if jq is available for JSON parsing
     if command -v jq &> /dev/null; then
         # Parse JSON using jq
-        APP_VERSION=$(echo "$response" | jq -r '.versions[0].version')
-        
+        APP_VERSION=$(echo "$response" | jq -r '.version')
+        # FIX: Extract from debUrl field
+        DEB_URL=$(echo "$response" | jq -r '.debUrl')
     else
         # Fallback to grep and sed if jq is not available
         print_text "${YELLOW}${BOLD}[WARNING] jq not found. Using fallback method for JSON parsing.${RESET}"
         APP_VERSION=$(echo "$response" | grep -o '"version":"[^"]*"' | head -1 | sed 's/"version":"//;s/"//')
+        # FIX: Extract from debUrl field using grep/sed
+        DEB_URL=$(echo "$response" | grep -o '"debUrl":"[^"]*"' | head -1 | sed 's/"debUrl":"//;s/"//')
     fi
-    
+
     # Verify that we got valid values
-    if [[ -z "$APP_VERSION" ]]; then
-        print_text "${RED}${BOLD}[ERROR] Failed to fetch version information.${RESET}"
-        print_text "${YELLOW}${BOLD}[INFO] Falling back to default version...${RESET}"
-        APP_VERSION="0.48.6"
+    if [[ -z "$APP_VERSION" || "$APP_VERSION" == "null" || -z "$DEB_URL" || "$DEB_URL" == "null" ]]; then
+        print_text "${RED}${BOLD}[ERROR] Failed to parse version information from API.${RESET}"
+        print_text "${RED}Response: $response${RESET}"
+        # Make sure DEB_URL is empty if parsing failed
+        DEB_URL=""
+        return 1
     else
         print_text "${GREEN}${BOLD}[SUCCESS] Found latest version: ${APP_VERSION}${RESET}"
     fi
 
-    # Set architecture-specific URL
-    if [[ "$ARCH" == "aarch64" || "$ARCH" == "arm64" ]]; then
-        DEB_URL="https://api2.cursor.sh/updates/download/golden/linux-arm64-deb/cursor/${APP_VERSION}"
-    elif [[ "$ARCH" == "x86_64" ]]; then
-        DEB_URL="https://api2.cursor.sh/updates/download/golden/linux-x64-deb/cursor/${APP_VERSION}"
-    else
-        print_text "${RED}${BOLD}[ERROR] Unsupported architecture: $ARCH${RESET}"
-        return 1
-    fi
-    
     return 0
 }
 
 # Function to install Cursor
 install_cursor() {
     display_header
-    
+
     # This installer is for .deb packages only
     if ! check_deb_system; then
         print_text "${YELLOW}Press Enter to return to the main menu...${RESET}"
         read -r
         return 1
     fi
-    
+
     # Define sudo usage if not running as root
     local use_sudo=""
     if [[ $EUID -ne 0 ]]; then
         use_sudo="sudo"
         print_text "${YELLOW}${BOLD}[INFO] Not running as root, will use sudo for installations${RESET}"
     fi
-    
+
     # Check for missing dependencies first
     print_text "${YELLOW}${BOLD}[INFO] Checking for dependencies...${RESET}"
     local deps=("wget" "grep" "sed" "awk" "jq")
     local missing_deps=()
-    
+
     for dep in "${deps[@]}"; do
         if ! command -v "$dep" &> /dev/null; then
             missing_deps+=("$dep")
         fi
     done
-    
+
     if [[ ${#missing_deps[@]} -gt 0 ]]; then
         # Install required missing dependencies
         print_text "${YELLOW}${BOLD}[INFO] Installing required dependencies: ${missing_deps[*]}${RESET}"
@@ -464,30 +450,30 @@ install_cursor() {
             return 1
         fi
     fi
-    
+
     # Also check for optional dependencies and install them
     print_text "${YELLOW}${BOLD}[INFO] Checking for optional dependencies...${RESET}"
     local optional_deps=("xxd" "python3" "curl")
     local missing_optional=()
-    
+
     for dep in "${optional_deps[@]}"; do
         if ! command -v "$dep" &> /dev/null; then
             missing_optional+=("$dep")
         fi
     done
-    
+
     if [[ ${#missing_optional[@]} -gt 0 ]]; then
         print_text "${YELLOW}${BOLD}[INFO] Installing optional dependencies: ${missing_optional[*]}${RESET}"
         install_dependencies "${missing_optional[@]}"
         # Continue even if optional dependencies fail
     fi
-    
+
     # After all dependencies are installed, check specifically for jq
     if ! command -v jq &> /dev/null; then
         print_text "${YELLOW}${BOLD}[INFO] jq installation not detected. Trying direct installation methods...${RESET}"
-        
+
         $use_sudo apt update && $use_sudo apt install -y jq
-        
+
         # Check if jq is now available
         if ! command -v jq &> /dev/null; then
             print_text "${YELLOW}${BOLD}[WARNING] Could not install jq automatically.${RESET}"
@@ -497,25 +483,29 @@ install_cursor() {
             print_text "${GREEN}${BOLD}[SUCCESS] Successfully installed jq!${RESET}"
         fi
     fi
-    
-    # After all dependencies are installed, proceed with installation
+
+    # After all dependencies are satisfied, proceed with installation
     print_text "${GREEN}${BOLD}[SUCCESS] All dependencies are satisfied. Proceeding with installation...${RESET}"
-    
+
     check_installation
     if [ $? -eq 1 ]; then
         return
     fi
     create_temp_dir
-    
+
     # Fetch latest version and download URLs
-    fetch_download_urls
-    
+    if ! fetch_download_urls; then
+        print_text "${RED}${BOLD}[ERROR] Could not fetch download information. Installation aborted.${RESET}"
+        cleanup
+        return 1
+    fi
+
     if [[ -z "$DEB_URL" ]]; then
          print_text "${RED}${BOLD}[ERROR] Could not determine download URL. Installation aborted.${RESET}"
          cleanup
          return 1
     fi
-    
+
     print_text "${BLUE}${BOLD}[1/3]${RESET} ${YELLOW}Downloading Cursor AI Editor v${APP_VERSION} for ${ARCH}...${RESET}"
     wget -q --timeout=30 --tries=3 --show-progress -O Cursor.deb "$DEB_URL" || {
         print_text "${RED}${BOLD}[ERROR] Download failed. Please check your internet connection.${RESET}"
@@ -524,15 +514,15 @@ install_cursor() {
         cleanup
         return 1
     }
-    
+
     print_text "${BLUE}${BOLD}[2/3]${RESET} ${YELLOW}Installing .deb package (this may take a moment)...${RESET}"
-    
+
     # Use apt install to handle dependencies automatically
     if ! $use_sudo apt install -y ./Cursor.deb; then
          print_text "${RED}${BOLD}[ERROR] Failed to install .deb package.${RESET}"
          print_text "${YELLOW}${BOLD}[INFO] Trying with 'dpkg -i' and 'apt -f install'...${RESET}"
          $use_sudo dpkg -i ./Cursor.deb || $use_sudo apt --fix-broken install -y
-         
+
          # Final check
          if ! dpkg -s cursor 2>/dev/null | grep -q "Status: install ok installed"; then
             print_text "${RED}${BOLD}[ERROR] Installation failed. Please try installing manually.${RESET}"
@@ -543,14 +533,14 @@ install_cursor() {
 
     print_text "${BLUE}${BOLD}[3/3]${RESET} ${YELLOW}Applying '--no-sandbox' flag to desktop launcher...${RESET}"
     local desktop_file="/usr/share/applications/cursor.desktop"
-    
+
     if [ -f "$desktop_file" ]; then
         # Modify the main Exec line
-        $use_sudo sed -i 's|^Exec=/usr/share/cursor/cursor|Exec=/usr/share/cursor/cursor --no-sandbox %F|' "$desktop_file"
-        
+        $use_sudo sed -i 's|^Exec=/usr/share/cursor/cursor.*|Exec=/usr/share/cursor/cursor --no-sandbox %F|' "$desktop_file"
+
         # Modify the "New Empty Window" action Exec line
-        $use_sudo sed -i 's|^Exec=/usr/share/cursor/cursor --new-window|Exec=/usr/share/cursor/cursor --no-sandbox --new-window %F|' "$desktop_file"
-        
+        $use_sudo sed -i 's|^Exec=/usr/share/cursor/cursor --new-window.*|Exec=/usr/share/cursor/cursor --no-sandbox --new-window %F|' "$desktop_file"
+
         # Refresh the desktop database
         $use_sudo update-desktop-database &> /dev/null || true
         print_text "${GREEN}${BOLD}[SUCCESS] Desktop file patched.${RESET}"
@@ -558,20 +548,20 @@ install_cursor() {
         print_text "${YELLOW}${BOLD}[WARNING] Could not find $desktop_file to modify.${RESET}"
     fi
 
-    
+
     cleanup
-    
+
     # Installation complete
     echo
     print_text "${GREEN}${BOLD}Cursor AI Editor v${APP_VERSION} installed successfully!${RESET}"
-    
+
     local completion_content=(
         ""
         "${MAGENTA}${BOLD}INSTALLATION COMPLETE${RESET}"
         ""
     )
     print_box "${completion_content[@]}"
-    
+
     echo
     print_text "${CYAN}[INFO] You can launch Cursor:${RESET}"
     print_text "  ${BOLD}• From application menu:${RESET} Search for 'Cursor'"
@@ -592,14 +582,14 @@ is_cursor_installed() {
 # Function to uninstall Cursor
 uninstall_cursor() {
     display_header
-    
+
     # This installer is for .deb packages only
     if ! check_deb_system; then
         print_text "${YELLOW}Press Enter to return to the main menu...${RESET}"
         read -r
         return 1
     fi
-    
+
     local use_sudo=""
     if [[ $EUID -ne 0 ]]; then
         use_sudo="sudo"
@@ -631,17 +621,17 @@ uninstall_cursor() {
             return
         fi
     fi
-    
+
     print_text "${BLUE}${BOLD}[1/2]${RESET} ${YELLOW}Purging 'cursor' package...${RESET}" # Updated text
     # FIX: Use 'purge' to remove package and config files
     $use_sudo apt purge -y cursor
-    
+
     print_text "${BLUE}${BOLD}[2/2]${RESET} ${YELLOW}Cleaning up dependencies...${RESET}"
     $use_sudo apt autoremove -y
-    
+
     echo
     print_text "${GREEN}${BOLD}Cursor AI Editor has been successfully purged!${RESET}" # Updated text
-    
+
     local uninstall_content=(
         ""
         "${MAGENTA}${BOLD}UNINSTALLATION COMPLETE${RESET}"
@@ -653,7 +643,7 @@ uninstall_cursor() {
 # Function to update Cursor
 update_cursor() {
     display_header
-    
+
     # This installer is for .deb packages only
     if ! check_deb_system; then
         print_text "${YELLOW}Press Enter to return to the main menu...${RESET}"
@@ -670,12 +660,15 @@ update_cursor() {
         fi
         return
     fi
-    
+
     print_text "${YELLOW}${BOLD}[INFO] Checking for updates...${RESET}"
-    
+
     # Fetch latest version info
-    fetch_download_urls
-    
+    if ! fetch_download_urls; then
+         print_text "${RED}${BOLD}[ERROR] Could not check for updates.${RESET}"
+         return 1
+    fi
+
     # Get installed version
     local installed_version=""
     # FIX: Check for the specific "installed" status.
@@ -684,10 +677,10 @@ update_cursor() {
     else
         installed_version="unknown"
     fi
-    
+
     print_text "${CYAN}${BOLD}[INFO] Installed version: ${BOLD}$installed_version${RESET}"
     print_text "${CYAN}${BOLD}[INFO] Latest version: ${BOLD}$APP_VERSION${RESET}"
-    
+
     if [[ "$installed_version" == "$APP_VERSION" ]]; then
         print_text "${GREEN}${BOLD}[SUCCESS] You already have the latest version installed!${RESET}"
         print_text "${YELLOW}${BOLD}[INFO] Would you like to reinstall anyway? (y/n):${RESET} "
@@ -697,10 +690,10 @@ update_cursor() {
             return
         fi
     fi
-    
+
     # Directly install the latest version (overwrite existing installation)
     print_text "${YELLOW}${BOLD}[INFO] Updating Cursor AI Editor from v$installed_version to v$APP_VERSION...${RESET}"
-    
+
     # The installation function handles updates automatically
     install_cursor
 }
@@ -708,10 +701,13 @@ update_cursor() {
 # Function to show about information
 show_about() {
     display_header
-    
-    # Fetch latest version info
-    fetch_download_urls
-    
+
+    # Fetch latest version info if not already fetched
+    if [[ "$APP_VERSION" == "0.0.0" ]]; then
+        fetch_download_urls > /dev/null 2>&1 || true # Ignore errors here, just display defaults
+    fi
+
+
     print_text "${CYAN}${BOLD}About Cursor AI Editor${RESET}"
     print_text "${CYAN}────────────────────${RESET}"
     echo
@@ -727,9 +723,9 @@ show_about() {
     print_text "  • ${CYAN}Request ID reset for privacy${RESET}"
     echo
     print_text "${BOLD}Installer Information:${RESET}"
-    print_text "  • ${CYAN}Script version: 3.3 (DEB Edition)${RESET}"
+    print_text "  • ${CYAN}Script version: 3.6 (DEB Edition)${RESET}"
     print_text "  • ${CYAN}Author: Mahesh Technicals${RESET}"
-    print_text "  • ${CYAN}App version: $APP_VERSION${RESET}"
+    print_text "  • ${CYAN}Latest App version: ${APP_VERSION:-[Fetching failed]}${RESET}" # Show version or fallback
     print_text "  • ${CYAN}Architecture: $ARCH${RESET}"
     echo
     print_text "${YELLOW}Press Enter to return to the main menu...${RESET}"
@@ -771,21 +767,21 @@ ask_main_menu() {
 # Function to generate random hexadecimal string of specified length
 generate_hex_string() {
     local length=$1
-    
+
     # Try using xxd if available
     if command -v xxd &>/dev/null; then
         # Ensure we get exactly the requested length with no newlines
         head -c $((length/2)) /dev/urandom | xxd -p | tr -d '\n' | head -c $length
         return
     fi
-    
+
     # Fallback to openssl if available
     if command -v openssl &>/dev/null; then
         # Ensure we get exactly the requested length with no newlines
         openssl rand -hex $((length/2)) | tr -d '\n' | head -c $length
         return
     fi
-    
+
     # Last fallback method using built-in bash/date/random
     local result=""
     local chars="0123456789abcdef"
@@ -804,13 +800,13 @@ generate_uuid() {
         uuidgen | tr -d '\n'
         return
     fi
-    
+
     # Fallback to Python if available
     if command -v python3 &>/dev/null; then
         python3 -c 'import uuid; print(uuid.uuid4(), end="")' | tr -d '\n'
         return
     fi
-    
+
     # Fallback to custom implementation
     local hex=$(generate_hex_string 32)
     local uuid="${hex:0:8}-${hex:8:4}-4${hex:13:3}-${hex:16:4}-${hex:20:12}"
@@ -833,14 +829,14 @@ fix_storage_json() {
     else
         print_text "${YELLOW}${BOLD}[INFO] Backup already exists, skipping backup creation...${RESET}"
     fi
-    
+
     # Generate new IDs
     local new_machine_id=$(generate_hex_string 64)
     local new_mac_id=$(generate_hex_string 64)
     local new_device_id=$(generate_uuid)
-    
+
     print_text "${BLUE}${BOLD}[INFO] Creating fixed JSON with new IDs...${RESET}"
-    
+
     # Create a new storage.json file directly
     cat > "$CONFIG_FILE" << EOF
 {
@@ -911,7 +907,7 @@ fix_storage_json() {
   }
 }
 EOF
-    
+
     # Verify it's valid JSON
     if command -v python3 >/dev/null 2>&1; then
         if ! python3 -c "import json; json.load(open('$CONFIG_FILE'))" 2>/dev/null; then
@@ -923,12 +919,12 @@ EOF
             return 1
         fi
     fi
-    
+
     # Get the new IDs for display
     local new_machine_id=$(get_clean_id "telemetry.machineId" "$CONFIG_FILE")
     local new_mac_id=$(get_clean_id "telemetry.macMachineId" "$CONFIG_FILE")
     local new_device_id=$(get_clean_id "telemetry.devDeviceId" "$CONFIG_FILE")
-    
+
     # Display results
     echo
     print_text "${GREEN}${BOLD}✅ Telemetry IDs have been reset using specialized method!${RESET}"
@@ -938,7 +934,7 @@ EOF
     print_text "${GREEN}Mac ID:        ${RESET}${new_mac_id}"
     print_text "${GREEN}Device ID:     ${RESET}${new_device_id}"
     echo
-    
+
     # Fix permissions if running as root
     if [ "$SUDO_USER" ] && [ "$EUID" -eq 0 ]; then
         chown $SUDO_USER:$(id -gn $SUDO_USER) "$CONFIG_FILE"
@@ -947,16 +943,16 @@ EOF
         fi
         print_text "${YELLOW}${BOLD}[INFO] Fixed file ownership for regular user.${RESET}"
     fi
-    
+
     # Display backup message based on which backup exists
     if [ -f "${CONFIG_FILE}.bak" ]; then
         print_text "${YELLOW}Backup saved to: ${CONFIG_FILE}.bak${RESET}"
     elif [ -f "${CONFIG_FILE}.original" ]; then
         print_text "${YELLOW}Backup saved to: ${CONFIG_FILE}.original${RESET}"
     fi
-    
+
     print_text "${GREEN}${BOLD}Please restart Cursor for changes to take effect.${RESET}"
-    
+
     local reset_content=(
         "${MAGENTA}${BOLD}REQUEST IDs RESET COMPLETE${RESET}"
     )
@@ -967,42 +963,42 @@ EOF
 # Function to reset request IDs
 reset_request_ids() {
     display_header
-    
+
     # Make sure the config directory exists
     local config_dir=$(dirname "$CONFIG_FILE")
     if [ ! -d "$config_dir" ]; then
         print_text "${YELLOW}${BOLD}[INFO] Creating config directory: $config_dir${RESET}"
         mkdir -p "$config_dir"
     fi
-    
+
     # If config file doesn't exist, create a new one
     if [ ! -f "$CONFIG_FILE" ]; then
         print_text "${YELLOW}${BOLD}[INFO] Config file not found. Creating a new one.${RESET}"
         touch "$CONFIG_FILE"
         echo "{}" > "$CONFIG_FILE"
     fi
-    
+
     # Check if we have write permission
     if [ ! -w "$CONFIG_FILE" ]; then
         print_text "${RED}${BOLD}[ERROR] No write permission for $CONFIG_FILE${RESET}"
         print_text "${YELLOW}${BOLD}You may need to run this command with sudo or change file permissions.${RESET}"
         return 1
     fi
-    
+
     print_text "${BLUE}${BOLD}[INFO] Reading current telemetry IDs...${RESET}"
-    
+
     # Try a special direct method for the specific storage.json format
     if grep -q "Downloads" "$CONFIG_FILE"; then
         print_text "${YELLOW}${BOLD}[INFO] Using specialized method for storage.json${RESET}"
         fix_storage_json
         return 0
     fi
-    
+
     # Create backup of original file - only if no backup already exists
     if [ -f "$CONFIG_FILE" ] && [ ! -f "${CONFIG_FILE}.bak" ] && [ ! -f "${CONFIG_FILE}.original" ]; then
         print_text "${YELLOW}${BOLD}[INFO] Creating backup of original file...${RESET}"
         cp "$CONFIG_FILE" "${CONFIG_FILE}.bak" 2>/dev/null || true
-        
+
         # Fix backup file ownership if running as root
         if [ "$SUDO_USER" ] && [ "$EUID" -eq 0 ]; then
             chown $SUDO_USER:$(id -gn $SUDO_USER) "${CONFIG_FILE}.bak" 2>/dev/null || true
@@ -1010,38 +1006,38 @@ reset_request_ids() {
     elif [ -f "${CONFIG_FILE}.bak" ] || [ -f "${CONFIG_FILE}.original" ]; then
         print_text "${YELLOW}${BOLD}[INFO] Backup already exists, skipping backup creation...${RESET}"
     fi
-    
+
     # Generate new IDs
     print_text "${BLUE}${BOLD}[INFO] Generating new IDs...${RESET}"
     local new_machine_id=$(generate_hex_string 64)
     local new_mac_id=$(generate_hex_string 64)
     local new_device_id=$(generate_uuid)
-    
+
     # Read original file
     local file_content=$(cat "$CONFIG_FILE")
-    
+
     # Extract current IDs using grep and sed
     local current_machine_id=$(echo "$file_content" | grep -o '"telemetry.machineId"[^"]*"[^"]*"' | sed 's/"telemetry.machineId".*: *"\([^"]*\)".*/\1/' | tr -d '\n ')
     local current_mac_id=$(echo "$file_content" | grep -o '"telemetry.macMachineId"[^"]*"[^"]*"' | sed 's/"telemetry.macMachineId".*: *"\([^"]*\)".*/\1/' | tr -d '\n ')
     local current_device_id=$(echo "$file_content" | grep -o '"telemetry.devDeviceId"[^"]*"[^"]*"' | sed 's/"telemetry.devDeviceId".*: *"\([^"]*\)".*/\1/' | tr -d '\n ,')
-    
+
     # Use sed to replace the values - handle multiline and preserve structure
     print_text "${BLUE}${BOLD}[INFO] Updating telemetry IDs...${RESET}"
-    
+
     # Create a temporary file for processing
     local tmp_file=$(mktemp)
-    
+
     # If jq is available, use it for safer JSON manipulation
     if command -v jq >/dev/null 2>&1; then
         # First fix any issues with the JSON format
         # Replace line breaks and fix missing quotes in the original file
         cat "$CONFIG_FILE" | tr -d '\n' | sed 's/\([a-f0-9]*\)"/\1"/g' > "$tmp_file"
-        
+
         # Now use jq to update the values
         jq --arg mid "$new_machine_id" --arg mmid "$new_mac_id" --arg did "$new_device_id" \
            '.["telemetry.machineId"] = $mid | .["telemetry.macMachineId"] = $mmid | .["telemetry.devDeviceId"] = $did' \
            "$tmp_file" > "${tmp_file}.new"
-        
+
         if [ -s "${tmp_file}.new" ]; then
             cat "${tmp_file}.new" > "$CONFIG_FILE"
             rm -f "${tmp_file}.new"
@@ -1052,12 +1048,12 @@ reset_request_ids() {
         # Manual method if jq is not available
         # Fix JSON format issues first
         cat "$CONFIG_FILE" | tr -d '\n' | sed 's/\([a-f0-9]*\)"/\1"/g' > "$tmp_file"
-        
+
         # Replace the telemetry IDs
         sed -i.sedbak "s|\"telemetry.machineId\": *\"[^\"]*\"|\"telemetry.machineId\": \"$new_machine_id\"|g" "$tmp_file"
         sed -i.sedbak "s|\"telemetry.macMachineId\": *\"[^\"]*\"|\"telemetry.macMachineId\": \"$new_mac_id\"|g" "$tmp_file"
         sed -i.sedbak "s|\"telemetry.devDeviceId\": *\"[^\"]*\"|\"telemetry.devDeviceId\": \"$new_device_id\"|g" "$tmp_file"
-        
+
         # Add proper formatting to make the JSON readable
         if command -v python3 >/dev/null 2>&1; then
             python3 -c "
@@ -1079,16 +1075,16 @@ except Exception as e:
             cat "$tmp_file" > "$CONFIG_FILE"
         fi
     fi
-    
+
     rm -f "$tmp_file" "$tmp_file.sedbak" 2>/dev/null
-    
+
     # Verify the values were updated
     if [ -f "$CONFIG_FILE" ]; then
         local updated_content=$(cat "$CONFIG_FILE")
         local updated_machine_id=$(echo "$updated_content" | grep -o '"telemetry.machineId"[^"]*"[^"]*"' | sed 's/"telemetry.machineId".*: *"\([^"]*\)".*/\1/' | tr -d '\n ')
         local updated_mac_id=$(echo "$updated_content" | grep -o '"telemetry.macMachineId"[^"]*"[^"]*"' | sed 's/"telemetry.macMachineId".*: *"\([^"]*\)".*/\1/' | tr -d '\n ')
         local updated_device_id=$(echo "$updated_content" | grep -o '"telemetry.devDeviceId"[^"]*"[^"]*"' | sed 's/"telemetry.devDeviceId".*: *"\([^"]*\)".*/\1/' | tr -d '\n ,')
-        
+
         local success=true
         if [ -z "$updated_machine_id" ] || [ "$updated_machine_id" != "$new_machine_id" ]; then
             success=false
@@ -1099,12 +1095,12 @@ except Exception as e:
         if [ -z "$updated_device_id" ] || [ "$updated_device_id" != "$new_device_id" ]; then
             success=false
         fi
-        
+
         # Last resort - if all else fails, create a minimal JSON with just the telemetry IDs
         if [ "$success" = false ]; then
             print_text "${YELLOW}${BOLD}[WARNING] Failed to update IDs while preserving other settings.${RESET}"
             print_text "${YELLOW}${BOLD}Using fallback method with minimal settings.${RESET}"
-            
+
             # Create minimal JSON with just the telemetry IDs
             cat > "$CONFIG_FILE" << EOF
 {
@@ -1113,15 +1109,15 @@ except Exception as e:
   "telemetry.devDeviceId": "$new_device_id"
 }
 EOF
-            
+
             print_text "${YELLOW}${BOLD}[WARNING] Other settings may have been lost.${RESET}"
-            
+
             # Fix permissions if running as root
             if [ "$SUDO_USER" ] && [ "$EUID" -eq 0 ]; then
                 chown $SUDO_USER:$(id -gn $SUDO_USER) "$CONFIG_FILE"
                 print_text "${YELLOW}${BOLD}[INFO] Fixed file ownership for regular user.${RESET}"
             fi
-            
+
             # Update message to reflect whether a new backup was created or an existing one exists
             if [ -f "${CONFIG_FILE}.bak" ]; then
                 if [ "$(find "${CONFIG_FILE}.bak" -mmin -2)" ]; then
@@ -1132,10 +1128,10 @@ EOF
             elif [ -f "${CONFIG_FILE}.original" ]; then
                 print_text "${YELLOW}${BOLD}Your original settings can be found in the backup at ${CONFIG_FILE}.original${RESET}"
             fi
-            
+
             success=true
         fi
-        
+
         # Display results
         echo
         if [ "$success" = true ]; then
@@ -1143,7 +1139,7 @@ EOF
         else
             print_text "${RED}${BOLD}❌ Failed to reset telemetry IDs.${RESET}"
         fi
-        
+
         echo
         print_text "${CYAN}${BOLD}Old Values:${RESET}"
         print_text "${YELLOW}Machine ID:    ${RESET}${current_machine_id:-[Not Found]}"
@@ -1155,10 +1151,10 @@ EOF
         print_text "${GREEN}Mac ID:        ${RESET}${new_mac_id}"
         print_text "${GREEN}Device ID:     ${RESET}${new_device_id}"
         echo
-        
+
         print_text "${YELLOW}Backup saved to: ${CONFIG_FILE}.bak${RESET}"
         print_text "${GREEN}${BOLD}Please restart Cursor for changes to take effect.${RESET}"
-        
+
         local reset_content=(
             "${MAGENTA}${BOLD}REQUEST IDs RESET COMPLETE${RESET}"
         )
@@ -1183,18 +1179,18 @@ display_status_table() {
     fi
 
     # Fetch latest version
-    if [[ -z "$APP_VERSION" || "$APP_VERSION" == "0.48.6" ]]; then
+    if [[ -z "$APP_VERSION" || "$APP_VERSION" == "0.0.0" ]]; then
         fetch_download_urls > /dev/null 2>&1
     fi
-    
+
     local latest_version="$APP_VERSION"
-    
+
     # Set table dimensions and styles
     local name="Cursor AI Editor"
     local table_width=60
     local col1_width=20
     local col2_width=$((table_width - col1_width - 4))  # -4 for borders and spacing
-    
+
     # Create top border
     local top_border="${CYAN}${BOLD}╔"
     for ((i=0; i<col1_width; i++)); do
@@ -1205,7 +1201,7 @@ display_status_table() {
         top_border+="═"
     done
     top_border+="╗${RESET}"
-    
+
     # Create middle border
     local mid_border="${CYAN}${BOLD}╠"
     for ((i=0; i<col1_width; i++)); do
@@ -1216,7 +1212,7 @@ display_status_table() {
         mid_border+="═"
     done
     mid_border+="╣${RESET}"
-    
+
     # Create bottom border
     local bottom_border="${CYAN}${BOLD}╚"
     for ((i=0; i<col1_width; i++)); do
@@ -1227,10 +1223,10 @@ display_status_table() {
         bottom_border+="═"
     done
     bottom_border+="╝${RESET}"
-    
+
     # Print table header
     echo -e "$top_border"
-    
+
     # Print table title
     local title="STATUS INFORMATION"
     local padding=$(( (table_width - ${#title} - 2) / 2 ))
@@ -1238,7 +1234,7 @@ display_status_table() {
     if (( (table_width - ${#title} - 2) % 2 != 0 )); then
         right_padding=$((padding + 1))
     fi
-    
+
     local title_row="${CYAN}${BOLD}║${RESET}"
     for ((i=0; i<padding; i++)); do
         title_row+=" "
@@ -1248,10 +1244,10 @@ display_status_table() {
         title_row+=" "
     done
     title_row+="${CYAN}${BOLD}║${RESET}"
-    
+
     echo -e "$title_row"
     echo -e "$mid_border"
-    
+
     # Print Name row
     local name_row="${CYAN}${BOLD}║${RESET} ${BOLD}Name${RESET}"
     local name_padding=$((col1_width - 4))
@@ -1265,7 +1261,7 @@ display_status_table() {
     done
     name_row+="${CYAN}${BOLD}║${RESET}"
     echo -e "$name_row"
-    
+
     # Print Installed Version row
     echo -e "$mid_border"
     local installed_row="${CYAN}${BOLD}║${RESET} ${BOLD}Installed Version${RESET}"
@@ -1273,13 +1269,13 @@ display_status_table() {
     for ((i=0; i<installed_padding; i++)); do
         installed_row+=" "
     done
-    
+
     # Color for installed version (red if not installed)
     local version_color=$GREEN
     if [[ "$installed_version" == "Not installed yet" ]]; then
         version_color=$RED
     fi
-    
+
     installed_row+="${CYAN}${BOLD}║${RESET} ${version_color}$installed_version${RESET}"
     local value_padding=$((col2_width - ${#installed_version} - 1))
     for ((i=0; i<value_padding; i++)); do
@@ -1287,7 +1283,7 @@ display_status_table() {
     done
     installed_row+="${CYAN}${BOLD}║${RESET}"
     echo -e "$installed_row"
-    
+
     # Print Latest Version row
     echo -e "$mid_border"
     local latest_row="${CYAN}${BOLD}║${RESET} ${BOLD}Latest Version${RESET}"
@@ -1302,14 +1298,14 @@ display_status_table() {
     done
     latest_row+="${CYAN}${BOLD}║${RESET}"
     echo -e "$latest_row"
-    
+
     # Print table footer
     echo -e "$bottom_border"
     echo
 }
 
 # Process command line arguments
-if [[ $# -gt 0 ]]; then    
+if [[ $# -gt 0 ]]; then
     case "$1" in
         -r|--reset-ids)
             # Reset IDs doesn't necessarily need root access
@@ -1325,7 +1321,7 @@ if [[ $# -gt 0 ]]; then
         *)
             # All other commands require root
             check_root || exit 1
-            
+
             case "$1" in
                 -i|--install)
                     # Call the install_cursor function which handles dependency checks and installation
@@ -1364,32 +1360,32 @@ fetch_download_urls > /dev/null 2>&1 || true
 # Main menu
 while true; do
     display_header
-    
+
     # Display status table
     display_status_table
-    
+
     echo -e "${CYAN}Select an option:${RESET}"
     echo
     echo -e "1) ${GREEN}Install${RESET} Cursor AI Editor"
     echo -e "2) ${RED}Uninstall${RESET} Cursor AI Editor"
     echo -e "3) ${BLUE}Update${RESET} Cursor AI Editor"
-    echo -e "4. ${MAGENTA}Reset Request ID${RESET}"
+    echo -e "4) ${MAGENTA}Reset Request ID${RESET}"
     echo -e "5) ${YELLOW}About${RESET} Cursor AI Editor"
     echo -e "6) ${MAGENTA}Help${RESET}"
     echo -e "7) ${CYAN}Exit${RESET}"
     echo
-    
+
     # Input prompt
     echo -n -e "${CYAN}Enter your choice [1-7]:${RESET} "
     read -r choice
-    
+
     case "$choice" in
         1|2|3)
             # Options that require root access
             if ! check_root; then
                 continue
             fi
-            
+
             # Check if it's a debian system
             if ! check_deb_system; then
                 print_text "${YELLOW}Press Enter to return to the main menu...${RESET}"
@@ -1425,7 +1421,7 @@ while true; do
                 read -r
                 continue
             fi
-            
+
             reset_request_ids
             ask_main_menu
             ;;
