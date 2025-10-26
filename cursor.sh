@@ -1,26 +1,26 @@
 #!/bin/bash
 ################################################################################
 #                                                                              #
-#         🚀 Cursor AI Editor Installer & Uninstaller 🚀                        #
+#                 🚀 Cursor AI Editor Installer & Uninstaller 🚀                 #
 #                                                                              #
-#                  ✨ Author: Mahesh Technicals ✨                              #
-#                  🌟 Version: 3.0                                            #
-#                  📌 Modern & Stylish UI with Error Handling                  #
+#                        ✨ Author: Mahesh Technicals ✨                         #
+#                        🌟 Version: 3.2 (DEB Edition) 🌟                       #
+#                📌 Modern & Stylish UI with Error Handling                #
 #                                                                              #
 ################################################################################
 
 # Define variables
 APP_NAME="Cursor"
-APP_VERSION="0.48.6"  # Default version, will be updated by fetch_download_urls
+APP_VERSION="0.48.6" # Default version, will be updated by fetch_download_urls
 ARCH=$(uname -m)
-APPIMAGE_URL=""
+DEB_URL=""
 VERSION_JSON_URL="https://raw.githubusercontent.com/oslook/cursor-ai-downloads/refs/heads/main/version-history.json"
 
 # Initialize default URLs based on architecture (these will be updated later)
 if [[ "$ARCH" == "aarch64" || "$ARCH" == "arm64" ]]; then
-    APPIMAGE_URL="https://downloads.cursor.com/production/1649e229afdef8fd1d18ea173f063563f1e722ef/linux/arm64/Cursor-${APP_VERSION}-aarch64.AppImage"
+    DEB_URL="https://api2.cursor.sh/updates/download/golden/linux-arm64-deb/cursor/${APP_VERSION}"
 elif [[ "$ARCH" == "x86_64" ]]; then
-    APPIMAGE_URL="https://downloads.cursor.com/production/1649e229afdef8fd1d18ea173f063563f1e722ef/linux/x64/Cursor-${APP_VERSION}-x86_64.AppImage"
+    DEB_URL="https://api2.cursor.sh/updates/download/golden/linux-x64-deb/cursor/${APP_VERSION}"
 else
     echo -e "\e[31m[ERROR] Unsupported architecture: $ARCH\e[0m"
     # We'll handle this properly later
@@ -33,9 +33,8 @@ else
     ACTUAL_HOME=$HOME
 fi
 
-INSTALL_DIR="/opt/cursor"
-DESKTOP_FILE="/usr/share/applications/cursor.desktop"
-SYMLINK_PATH="/usr/local/bin/cursor"
+# Paths are now managed by the .deb package
+# Removed: INSTALL_DIR, DESKTOP_FILE, SYMLINK_PATH
 TEMP_DIR="/tmp/cursor-installer"
 CONFIG_FILE="$ACTUAL_HOME/.config/Cursor/User/globalStorage/storage.json"
 
@@ -123,6 +122,17 @@ check_root() {
     return 0
 }
 
+# Function to check if this is a Debian-based system
+check_deb_system() {
+    if ! command -v apt &> /dev/null && ! command -v apt-get &> /dev/null; then
+        print_text "${RED}${BOLD}[ERROR] This installer only supports Debian-based systems (like Ubuntu, Debian, Mint).${RESET}"
+        print_text "${RED}${BOLD}[ERROR] Package managers 'apt' or 'apt-get' not found.${RESET}"
+        return 1
+    fi
+    return 0
+}
+
+
 # Function to install missing dependencies
 install_dependencies() {
     local missing_deps=("$@")
@@ -133,6 +143,12 @@ install_dependencies() {
     
     print_text "${YELLOW}${BOLD}[INFO] Installing missing dependencies: ${missing_deps[*]}${RESET}"
     
+    # This script now ONLY supports apt/apt-get
+    if ! check_deb_system; then
+        print_text "${RED}${BOLD}[ERROR] Cannot install dependencies on a non-Debian system.${RESET}"
+        return 1
+    fi
+    
     # Try to install dependencies with sudo if we're not already root
     local use_sudo=""
     if [[ $EUID -ne 0 ]]; then
@@ -140,77 +156,12 @@ install_dependencies() {
         print_text "${YELLOW}${BOLD}[INFO] Not running as root, will use sudo for installations${RESET}"
     fi
     
-    # Detect package manager
     if command -v apt &> /dev/null; then
         print_text "${BLUE}${BOLD}[INFO] Using apt package manager...${RESET}"
         $use_sudo apt update -qq && $use_sudo apt install -y "${missing_deps[@]}"
     elif command -v apt-get &> /dev/null; then
         print_text "${BLUE}${BOLD}[INFO] Using apt-get package manager...${RESET}"
         $use_sudo apt-get update -qq && $use_sudo apt-get install -y "${missing_deps[@]}"
-    elif command -v dnf &> /dev/null; then
-        print_text "${BLUE}${BOLD}[INFO] Using dnf package manager...${RESET}"
-        $use_sudo dnf install -y "${missing_deps[@]}"
-    elif command -v yum &> /dev/null; then
-        print_text "${BLUE}${BOLD}[INFO] Using yum package manager...${RESET}"
-        $use_sudo yum install -y "${missing_deps[@]}"
-    elif command -v pacman &> /dev/null; then
-        print_text "${BLUE}${BOLD}[INFO] Using pacman package manager...${RESET}"
-        $use_sudo pacman -Sy --noconfirm "${missing_deps[@]}"
-    elif command -v zypper &> /dev/null; then
-        print_text "${BLUE}${BOLD}[INFO] Using zypper package manager...${RESET}"
-        $use_sudo zypper install -y "${missing_deps[@]}"
-    elif command -v pkg &> /dev/null; then 
-        print_text "${BLUE}${BOLD}[INFO] Using pkg package manager (FreeBSD)...${RESET}"
-        $use_sudo pkg install -y "${missing_deps[@]}"
-    elif command -v apk &> /dev/null; then
-        print_text "${BLUE}${BOLD}[INFO] Using apk package manager (Alpine)...${RESET}"
-        $use_sudo apk add "${missing_deps[@]}"
-    elif command -v proot &> /dev/null || [[ -n "$ANDROID_ROOT" ]] || [[ -n "$TERMUX_VERSION" ]]; then
-        # Special case for Termux/PRoot environments
-        print_text "${BLUE}${BOLD}[INFO] Detected Termux/PRoot environment...${RESET}"
-        if command -v pkg &> /dev/null; then
-            # First update package lists
-            pkg update
-            # Install packages one by one to better handle errors
-            for dep in "${missing_deps[@]}"; do
-                print_text "${YELLOW}${BOLD}[INFO] Installing $dep...${RESET}"
-                if ! pkg install -y "$dep"; then
-                    # If jq fails to install with pkg, try with pip
-                    if [[ "$dep" == "jq" ]]; then
-                        print_text "${YELLOW}${BOLD}[INFO] Trying alternative installation method for jq...${RESET}"
-                        pkg install -y python-pip
-                        pip install jq
-                    fi
-                fi
-            done
-        elif command -v apt &> /dev/null; then
-            apt update
-            for dep in "${missing_deps[@]}"; do
-                apt install -y "$dep"
-                # If jq fails to install with apt, try with pip
-                if [[ "$dep" == "jq" ]] && ! command -v jq &> /dev/null; then
-                    print_text "${YELLOW}${BOLD}[INFO] Trying alternative installation method for jq...${RESET}"
-                    apt install -y python-pip
-                    pip install jq
-                fi
-            done
-        else
-            print_text "${RED}${BOLD}[ERROR] Could not find a suitable package manager in Termux.${RESET}"
-            print_text "${YELLOW}Please install the following dependencies manually: ${missing_deps[*]}${RESET}"
-            print_text "${YELLOW}Press Enter to continue...${RESET}"
-            read -r
-            return 1
-        fi
-    else
-        print_text "${RED}${BOLD}[ERROR] Could not detect package manager. Please install the following dependencies manually: ${missing_deps[*]}${RESET}"
-        print_text "${YELLOW}${BOLD}[INFO] For most common distributions:${RESET}"
-        print_text "       Debian/Ubuntu: ${BOLD}apt install ${missing_deps[*]}${RESET}"
-        print_text "       Fedora/RHEL: ${BOLD}dnf install ${missing_deps[*]}${RESET}"
-        print_text "       Arch Linux: ${BOLD}pacman -S ${missing_deps[*]}${RESET}"
-        print_text "       Alpine: ${BOLD}apk add ${missing_deps[*]}${RESET}"
-        print_text "${YELLOW}Press Enter to continue...${RESET}"
-        read -r
-        return 1
     fi
     
     # Verify installation
@@ -223,58 +174,10 @@ install_dependencies() {
     
     if [[ ${#still_missing[@]} -gt 0 ]]; then
         print_text "${RED}${BOLD}[ERROR] Failed to install some dependencies: ${still_missing[*]}${RESET}"
-        print_text "${YELLOW}${BOLD}[INFO] Attempting to install with alternative package names...${RESET}"
-        
-        # Second attempt with alternative package names
-        local alt_packages=()
-        for dep in "${still_missing[@]}"; do
-            case "$dep" in
-                jq)
-                    if command -v apt &> /dev/null || command -v apt-get &> /dev/null; then
-                        alt_packages+=("jq" "libjq1" "libjq-dev")
-                    elif command -v dnf &> /dev/null || command -v yum &> /dev/null; then
-                        alt_packages+=("jq" "jq-devel")
-                    elif command -v pacman &> /dev/null; then
-                        alt_packages+=("jq")
-                    elif command -v apk &> /dev/null; then
-                        alt_packages+=("jq")
-                    else
-                        alt_packages+=("jq")
-                    fi
-                    ;;
-                wget)
-                    alt_packages+=("wget" "wget2")
-                    ;;
-                *)
-                    alt_packages+=("$dep")
-                    ;;
-            esac
-        done
-        
-        # Try to install alternative packages
-        if command -v apt &> /dev/null || command -v apt-get &> /dev/null; then
-            $use_sudo apt install -y "${alt_packages[@]}" || $use_sudo apt-get install -y "${alt_packages[@]}"
-        elif command -v dnf &> /dev/null; then
-            $use_sudo dnf install -y "${alt_packages[@]}"
-        elif command -v pacman &> /dev/null; then
-            $use_sudo pacman -S --noconfirm "${alt_packages[@]}"
-        fi
-        
-        # Re-check if still missing
-        still_missing=()
-        for dep in "${missing_deps[@]}"; do
-            if ! command -v "$dep" &> /dev/null; then
-                still_missing+=("$dep")
-            fi
-        done
-        
-        if [[ ${#still_missing[@]} -gt 0 ]]; then
-            print_text "${RED}${BOLD}[ERROR] Still failed to install some dependencies: ${still_missing[*]}${RESET}"
-            print_text "${YELLOW}Please install them manually and run the script again.${RESET}"
-            print_text "${YELLOW}Press Enter to continue...${RESET}"
-            read -r
-            return 1
-        fi
+        print_text "${YELLOW}Please install them manually and run the script again.${RESET}"
+        print_text "${YELLOW}Press Enter to continue...${RESET}"
+        read -r
+        return 1
     fi
     
     print_text "${GREEN}${BOLD}[SUCCESS] All dependencies installed successfully!${RESET}"
@@ -284,18 +187,7 @@ install_dependencies() {
         print_text "${YELLOW}${BOLD}[WARNING] jq still not found after installation attempts.${RESET}"
         print_text "${YELLOW}${BOLD}[INFO] Will try one more alternative method...${RESET}"
         
-        # Try to install jq via npm if node is available
-        if command -v node &> /dev/null || command -v nodejs &> /dev/null; then
-            if command -v npm &> /dev/null; then
-                print_text "${BLUE}${BOLD}[INFO] Attempting to install jq via npm...${RESET}"
-                $use_sudo npm install -g node-jq
-                # Create a symlink if node-jq was installed but jq command is not available
-                if [ -f "$(npm root -g)/node-jq/bin/jq" ] && ! command -v jq &> /dev/null; then
-                    $use_sudo ln -sf "$(npm root -g)/node-jq/bin/jq" /usr/local/bin/jq
-                fi
-            fi
-        # Try to install via pip if python is available
-        elif command -v python3 &> /dev/null || command -v python &> /dev/null; then
+        if command -v python3 &> /dev/null || command -v python &> /dev/null; then
             if command -v pip &> /dev/null || command -v pip3 &> /dev/null; then
                 print_text "${BLUE}${BOLD}[INFO] Attempting to install jq via pip...${RESET}"
                 $use_sudo pip install jq || $use_sudo pip3 install jq
@@ -339,16 +231,14 @@ check_dependencies() {
     if [[ ${#missing_deps[@]} -gt 0 ]]; then
         print_text "${RED}${BOLD}[ERROR] Missing required dependencies: ${missing_deps[*]}${RESET}"
         print_text "${YELLOW}${BOLD}[INFO] Please install them using your package manager.${RESET}"
-        print_text "       For Debian/Ubuntu: ${BOLD}apt install ${missing_deps[*]}${RESET}"
-        print_text "       For Fedora/RHEL: ${BOLD}dnf install ${missing_deps[*]}${RESET}"
-        print_text "       For Arch Linux: ${BOLD}pacman -S ${missing_deps[*]}${RESET}"
+        print_text "                For Debian/Ubuntu: ${BOLD}apt install ${missing_deps[*]}${RESET}"
         return 1
     fi
     
     if [[ ${#missing_optional[@]} -gt 0 ]]; then
         print_text "${YELLOW}${BOLD}[WARNING] Some optional dependencies are missing: ${missing_optional[*]}${RESET}"
         print_text "${YELLOW}${BOLD}[INFO] These are not required but recommended for better functionality:${RESET}"
-        print_text "       For Debian/Ubuntu: ${BOLD}apt install ${missing_optional[*]}${RESET}"
+        print_text "                For Debian/Ubuntu: ${BOLD}apt install ${missing_optional[*]}${RESET}"
     fi
     
     print_text "${GREEN}${BOLD}[SUCCESS] All required dependencies are satisfied!${RESET}"
@@ -386,9 +276,6 @@ check_and_get_missing_dependencies() {
     if [[ ${#missing_optional[@]} -gt 0 ]]; then
         print_text "${YELLOW}${BOLD}[WARNING] Some optional dependencies are missing: ${missing_optional[*]}${RESET}"
         print_text "${YELLOW}${BOLD}[INFO] These are recommended but not required. They will not be installed automatically.${RESET}"
-        # Skipping prompt for optional dependencies to avoid blocking the installation
-        # echo "${missing_optional[@]}"
-        # return 2
     fi
     
     print_text "${GREEN}${BOLD}[SUCCESS] All required dependencies are satisfied!${RESET}"
@@ -404,7 +291,7 @@ display_header() {
         "${CYAN}${BOLD}Installation & Management${RESET}"
         ""
         "${CYAN}${BOLD}by Mahesh Technicals${RESET}"
-        "${CYAN}${BOLD}Version 3.0${RESET}"
+        "${CYAN}${BOLD}Version 3.2 (DEB Edition)${RESET}"
         ""
     )
     
@@ -432,8 +319,8 @@ cleanup() {
 
 # Function to check if Cursor is already installed
 check_installation() {
-    if [[ -d "$INSTALL_DIR" ]]; then
-        print_text "${YELLOW}${BOLD}[WARNING] Cursor is already installed at $INSTALL_DIR${RESET}"
+    if dpkg -s cursor &> /dev/null; then
+        print_text "${YELLOW}${BOLD}[WARNING] Cursor is already installed.${RESET}"
         print_text "${YELLOW}${BOLD}[INFO] Would you like to reinstall? (y/n):${RESET} "
         echo -n ""
         read -r choice
@@ -441,8 +328,7 @@ check_installation() {
             print_text "${YELLOW}${BOLD}[INFO] Installation aborted.${RESET}"
             return 1
         fi
-        print_text "${YELLOW}${BOLD}[INFO] Removing existing installation...${RESET}"
-        rm -rf "$INSTALL_DIR"
+        print_text "${YELLOW}${BOLD}[INFO] Proceeding with reinstallation...${RESET}"
     fi
     return 0
 }
@@ -479,9 +365,9 @@ fetch_download_urls() {
         # Use default values instead of exiting
         APP_VERSION="0.48.6"
         if [[ "$ARCH" == "aarch64" || "$ARCH" == "arm64" ]]; then
-            APPIMAGE_URL="https://downloads.cursor.com/production/1649e229afdef8fd1d18ea173f063563f1e722ef/linux/arm64/Cursor-${APP_VERSION}-aarch64.AppImage"
+            DEB_URL="https://api2.cursor.sh/updates/download/golden/linux-arm64-deb/cursor/${APP_VERSION}"
         elif [[ "$ARCH" == "x86_64" ]]; then
-            APPIMAGE_URL="https://downloads.cursor.com/production/1649e229afdef8fd1d18ea173f063563f1e722ef/linux/x64/Cursor-${APP_VERSION}-x86_64.AppImage"
+            DEB_URL="https://api2.cursor.sh/updates/download/golden/linux-x64-deb/cursor/${APP_VERSION}"
         else
             print_text "${RED}${BOLD}[ERROR] Unsupported architecture: $ARCH${RESET}"
             return 1
@@ -497,9 +383,9 @@ fetch_download_urls() {
         
         # Set architecture-specific URL (fallback)
         if [[ "$ARCH" == "aarch64" || "$ARCH" == "arm64" ]]; then
-            APPIMAGE_URL="https://downloads.cursor.com/production/1649e229afdef8fd1d18ea173f063563f1e722ef/linux/arm64/Cursor-${APP_VERSION}-aarch64.AppImage"
+            DEB_URL="https://api2.cursor.sh/updates/download/golden/linux-arm64-deb/cursor/${APP_VERSION}"
         elif [[ "$ARCH" == "x86_64" ]]; then
-            APPIMAGE_URL="https://downloads.cursor.com/production/1649e229afdef8fd1d18ea173f063563f1e722ef/linux/x64/Cursor-${APP_VERSION}-x86_64.AppImage"
+            DEB_URL="https://api2.cursor.sh/updates/download/golden/linux-x64-deb/cursor/${APP_VERSION}"
         fi
         return 0
     fi
@@ -508,61 +394,30 @@ fetch_download_urls() {
     if command -v jq &> /dev/null; then
         # Parse JSON using jq
         APP_VERSION=$(echo "$response" | jq -r '.versions[0].version')
-        local linux_arm64_url=$(echo "$response" | jq -r '.versions[0].platforms["linux-arm64"]')
-        local linux_x64_url=$(echo "$response" | jq -r '.versions[0].platforms["linux-x64"]')
         
-        # Set architecture-specific URL
-        if [[ "$ARCH" == "aarch64" || "$ARCH" == "arm64" ]]; then
-            APPIMAGE_URL="$linux_arm64_url"
-        elif [[ "$ARCH" == "x86_64" ]]; then
-            APPIMAGE_URL="$linux_x64_url"
-        else
-            print_text "${RED}${BOLD}[ERROR] Unsupported architecture: $ARCH${RESET}"
-            # Use default values
-            APP_VERSION="0.48.6"
-            if [[ "$ARCH" == "aarch64" || "$ARCH" == "arm64" ]]; then
-                APPIMAGE_URL="https://downloads.cursor.com/production/1649e229afdef8fd1d18ea173f063563f1e722ef/linux/arm64/Cursor-${APP_VERSION}-aarch64.AppImage"
-            elif [[ "$ARCH" == "x86_64" ]]; then
-                APPIMAGE_URL="https://downloads.cursor.com/production/1649e229afdef8fd1d18ea173f063563f1e722ef/linux/x64/Cursor-${APP_VERSION}-x86_64.AppImage"
-            fi
-            return 1
-        fi
     else
         # Fallback to grep and sed if jq is not available
         print_text "${YELLOW}${BOLD}[WARNING] jq not found. Using fallback method for JSON parsing.${RESET}"
         APP_VERSION=$(echo "$response" | grep -o '"version":"[^"]*"' | head -1 | sed 's/"version":"//;s/"//')
-        
-        if [[ "$ARCH" == "aarch64" || "$ARCH" == "arm64" ]]; then
-            APPIMAGE_URL=$(echo "$response" | grep -o '"linux-arm64":"[^"]*"' | head -1 | sed 's/"linux-arm64":"//;s/"//')
-        elif [[ "$ARCH" == "x86_64" ]]; then
-            APPIMAGE_URL=$(echo "$response" | grep -o '"linux-x64":"[^"]*"' | head -1 | sed 's/"linux-x64":"//;s/"//')
-        else
-            print_text "${RED}${BOLD}[ERROR] Unsupported architecture: $ARCH${RESET}"
-            # Use default values
-            APP_VERSION="0.48.6"
-            if [[ "$ARCH" == "aarch64" || "$ARCH" == "arm64" ]]; then
-                APPIMAGE_URL="https://downloads.cursor.com/production/1649e229afdef8fd1d18ea173f063563f1e722ef/linux/arm64/Cursor-${APP_VERSION}-aarch64.AppImage"
-            elif [[ "$ARCH" == "x86_64" ]]; then
-                APPIMAGE_URL="https://downloads.cursor.com/production/1649e229afdef8fd1d18ea173f063563f1e722ef/linux/x64/Cursor-${APP_VERSION}-x86_64.AppImage"
-            fi
-            return 1
-        fi
     fi
     
     # Verify that we got valid values
-    if [[ -z "$APP_VERSION" || -z "$APPIMAGE_URL" ]]; then
+    if [[ -z "$APP_VERSION" ]]; then
         print_text "${RED}${BOLD}[ERROR] Failed to fetch version information.${RESET}"
         print_text "${YELLOW}${BOLD}[INFO] Falling back to default version...${RESET}"
         APP_VERSION="0.48.6"
-        
-        # Set architecture-specific URL (fallback)
-        if [[ "$ARCH" == "aarch64" || "$ARCH" == "arm64" ]]; then
-            APPIMAGE_URL="https://downloads.cursor.com/production/1649e229afdef8fd1d18ea173f063563f1e722ef/linux/arm64/Cursor-${APP_VERSION}-aarch64.AppImage"
-        elif [[ "$ARCH" == "x86_64" ]]; then
-            APPIMAGE_URL="https://downloads.cursor.com/production/1649e229afdef8fd1d18ea173f063563f1e722ef/linux/x64/Cursor-${APP_VERSION}-x86_64.AppImage"
-        fi
     else
         print_text "${GREEN}${BOLD}[SUCCESS] Found latest version: ${APP_VERSION}${RESET}"
+    fi
+
+    # Set architecture-specific URL
+    if [[ "$ARCH" == "aarch64" || "$ARCH" == "arm64" ]]; then
+        DEB_URL="https://api2.cursor.sh/updates/download/golden/linux-arm64-deb/cursor/${APP_VERSION}"
+    elif [[ "$ARCH" == "x86_64" ]]; then
+        DEB_URL="https://api2.cursor.sh/updates/download/golden/linux-x64-deb/cursor/${APP_VERSION}"
+    else
+        print_text "${RED}${BOLD}[ERROR] Unsupported architecture: $ARCH${RESET}"
+        return 1
     fi
     
     return 0
@@ -571,6 +426,13 @@ fetch_download_urls() {
 # Function to install Cursor
 install_cursor() {
     display_header
+    
+    # This installer is for .deb packages only
+    if ! check_deb_system; then
+        print_text "${YELLOW}Press Enter to return to the main menu...${RESET}"
+        read -r
+        return 1
+    fi
     
     # Define sudo usage if not running as root
     local use_sudo=""
@@ -623,72 +485,7 @@ install_cursor() {
     if ! command -v jq &> /dev/null; then
         print_text "${YELLOW}${BOLD}[INFO] jq installation not detected. Trying direct installation methods...${RESET}"
         
-        # Try different methods based on detected package managers
-        if command -v apt &> /dev/null; then
-            print_text "${BLUE}${BOLD}[INFO] Using apt package manager...${RESET}"
-            $use_sudo apt update && $use_sudo apt install -y jq
-        elif command -v apt-get &> /dev/null; then
-            print_text "${BLUE}${BOLD}[INFO] Using apt-get package manager...${RESET}"
-            $use_sudo apt-get update && $use_sudo apt-get install -y jq
-        elif command -v dnf &> /dev/null; then
-            print_text "${BLUE}${BOLD}[INFO] Using dnf package manager...${RESET}"
-            $use_sudo dnf install -y jq
-        elif command -v yum &> /dev/null; then
-            print_text "${BLUE}${BOLD}[INFO] Using yum package manager...${RESET}"
-            $use_sudo yum install -y jq
-        elif command -v pacman &> /dev/null; then
-            print_text "${BLUE}${BOLD}[INFO] Using pacman package manager...${RESET}"
-            $use_sudo pacman -Sy --noconfirm jq
-        elif command -v pkg &> /dev/null; then
-            print_text "${BLUE}${BOLD}[INFO] Using pkg package manager...${RESET}"
-            pkg update && pkg install -y jq
-        elif command -v apk &> /dev/null; then
-            print_text "${BLUE}${BOLD}[INFO] Using apk package manager...${RESET}"
-            $use_sudo apk add jq
-        else
-            # Fallback to manual method for Termux PRoot
-            if [[ -d "/data/data/com.termux" ]] || [[ -n "$TERMUX_VERSION" ]]; then
-                print_text "${BLUE}${BOLD}[INFO] Detected Termux environment...${RESET}"
-                pkg update && pkg install -y jq || {
-                    apt update && apt install -y jq
-                }
-                
-                # If still not installed, try downloading a pre-built binary
-                if ! command -v jq &> /dev/null; then
-                    print_text "${YELLOW}${BOLD}[INFO] Package installation failed. Trying to download pre-built binary...${RESET}"
-                    
-                    # Create bin directory if it doesn't exist
-                    mkdir -p "$HOME/bin"
-                    
-                    # Download pre-built jq binary for ARM
-                    if [[ "$ARCH" == "aarch64" || "$ARCH" == "arm64" ]]; then
-                        wget -q --timeout=30 --tries=3 -O "$HOME/bin/jq" "https://github.com/stedolan/jq/releases/download/jq-1.6/jq-linux-arm64" || \
-                        curl -L --connect-timeout 30 -o "$HOME/bin/jq" "https://github.com/stedolan/jq/releases/download/jq-1.6/jq-linux-arm64"
-                    else # Assume x86_64
-                        wget -q --timeout=30 --tries=3 -O "$HOME/bin/jq" "https://github.com/stedolan/jq/releases/download/jq-1.6/jq-linux64" || \
-                        curl -L --connect-timeout 30 -o "$HOME/bin/jq" "https://github.com/stedolan/jq/releases/download/jq-1.6/jq-linux64"
-                    fi
-                    
-                    # Make it executable
-                    chmod +x "$HOME/bin/jq"
-                    
-                    # Add to PATH if not already there
-                    if [[ ":$PATH:" != *":$HOME/bin:"* ]]; then
-                        export PATH="$HOME/bin:$PATH"
-                    fi
-                    
-                    # Create .bashrc if it doesn't exist
-                    if [ ! -f "$HOME/.bashrc" ]; then
-                        touch "$HOME/.bashrc"
-                    fi
-                    
-                    # Add to .bashrc if not already there
-                    if ! grep -q "export PATH=\"\$HOME/bin:\$PATH\"" "$HOME/.bashrc"; then
-                        echo 'export PATH="$HOME/bin:$PATH"' >> "$HOME/.bashrc"
-                    fi
-                fi
-            fi
-        fi
+        $use_sudo apt update && $use_sudo apt install -y jq
         
         # Check if jq is now available
         if ! command -v jq &> /dev/null; then
@@ -712,101 +509,54 @@ install_cursor() {
     # Fetch latest version and download URLs
     fetch_download_urls
     
-    print_text "${BLUE}${BOLD}[1/4]${RESET} ${YELLOW}Downloading Cursor AI Editor v${APP_VERSION} for ${ARCH}...${RESET}"
-    wget -q --timeout=30 --tries=3 --show-progress -O Cursor.AppImage "$APPIMAGE_URL" || {
-        print_text "${RED}${BOLD}[ERROR] Download failed. Please check your internet connection.${RESET}"
-        print_text "${YELLOW}${BOLD}[INFO] You can try downloading the file manually from:${RESET}"
-        print_text "${CYAN}$APPIMAGE_URL${RESET}"
-        cleanup
-        return 1
-    }
-    
-    print_text "${BLUE}${BOLD}[2/4]${RESET} ${YELLOW}Making AppImage executable...${RESET}"
-    chmod +x Cursor.AppImage || {
-        print_text "${RED}${BOLD}[ERROR] Failed to set executable permissions.${RESET}"
-        cleanup
-        return
-    }
-    
-    print_text "${BLUE}${BOLD}[3/4]${RESET} ${YELLOW}Extracting AppImage...${RESET}"
-    ./Cursor.AppImage --appimage-extract > /dev/null 2>&1 &
-    extraction_pid=$!
-    
-    # Add a timeout for extraction (120 seconds)
-    local timeout=120
-    local start_time=$(date +%s)
-    local current_time=0
-    local elapsed_time=0
-    local delay=0.1
-    local spinstr='⣾⣽⣻⢿⡿⣟⣯⣷'
-    
-    echo -n ""
-    
-    while ps -p "$extraction_pid" &> /dev/null; do
-        local temp=${spinstr#?}
-        printf " ${CYAN}${BOLD}[%c]${RESET}  " "$spinstr"
-        local spinstr=$temp${spinstr%"$temp"}
-        sleep $delay
-        printf "\b\b\b\b\b\b\b\b\b"
-        
-        current_time=$(date +%s)
-        elapsed_time=$((current_time - start_time))
-        
-        if [ $elapsed_time -gt $timeout ]; then
-            print_text "${RED}${BOLD}[ERROR] Extraction timed out after $timeout seconds.${RESET}"
-            kill -9 $extraction_pid 2>/dev/null || true
-            cleanup
-            return 1
-        fi
-    done
-    printf "         \b\b\b\b\b\b\b\b\b"
-    
-    if [[ ! -d "squashfs-root" ]]; then
-        print_text "${RED}${BOLD}[ERROR] Extraction failed.${RESET}"
-        cleanup
-        return 1
+    if [[ -z "$DEB_URL" ]]; then
+         print_text "${RED}${BOLD}[ERROR] Could not determine download URL. Installation aborted.${RESET}"
+         cleanup
+         return 1
     fi
     
-    print_text "${BLUE}${BOLD}[4/4]${RESET} ${YELLOW}Installing Cursor system-wide...${RESET}"
-    mkdir -p "$INSTALL_DIR"
-    cp -r squashfs-root/* "$INSTALL_DIR/" || {
-        print_text "${RED}${BOLD}[ERROR] Failed to copy files to installation directory.${RESET}"
+    print_text "${BLUE}${BOLD}[1/3]${RESET} ${YELLOW}Downloading Cursor AI Editor v${APP_VERSION} for ${ARCH}...${RESET}"
+    wget -q --timeout=30 --tries=3 --show-progress -O Cursor.deb "$DEB_URL" || {
+        print_text "${RED}${BOLD}[ERROR] Download failed. Please check your internet connection.${RESET}"
+        print_text "${YELLOW}${BOLD}[INFO] You can try downloading the file manually from:${RESET}"
+        print_text "${CYAN}$DEB_URL${RESET}"
         cleanup
-        return
+        return 1
     }
     
-    # Create symbolic link
-    ln -sf "$INSTALL_DIR/AppRun" "$SYMLINK_PATH" || {
-        print_text "${RED}${BOLD}[WARNING] Failed to create symbolic link. You may need to run Cursor using full path.${RESET}"
-    }
+    print_text "${BLUE}${BOLD}[2/3]${RESET} ${YELLOW}Installing .deb package (this may take a moment)...${RESET}"
     
-    # Create desktop entry
-    print_text "${YELLOW}${BOLD}[INFO] Creating desktop shortcut...${RESET}"
-    cat <<EOF > "$DESKTOP_FILE"
-[Desktop Entry]
-Name=Cursor
-Comment=The AI-powered Code Editor
-GenericName=Text Editor
-Exec=cursor --no-sandbox %F
-Icon=$INSTALL_DIR/co.anysphere.cursor.png
-Type=Application
-StartupNotify=true
-StartupWMClass=Cursor
-Categories=TextEditor;Development;IDE;Utility;
-MimeType=text/plain;application/x-cursor-workspace;
-Actions=new-empty-window;
-Keywords=cursor;code;editor;programming;developer;ai;
-X-AppImage-Version=$APP_VERSION
+    # Use apt install to handle dependencies automatically
+    if ! $use_sudo apt install -y ./Cursor.deb; then
+         print_text "${RED}${BOLD}[ERROR] Failed to install .deb package.${RESET}"
+         print_text "${YELLOW}${BOLD}[INFO] Trying with 'dpkg -i' and 'apt -f install'...${RESET}"
+         $use_sudo dpkg -i ./Cursor.deb || $use_sudo apt --fix-broken install -y
+         
+         # Final check
+         if ! dpkg -s cursor &> /dev/null; then
+            print_text "${RED}${BOLD}[ERROR] Installation failed. Please try installing manually.${RESET}"
+            cleanup
+            return 1
+         fi
+    fi
 
-[Desktop Action new-empty-window]
-Name=New Empty Window
-Exec=cursor --no-sandbox --new-window %F
-Icon=$INSTALL_DIR/co.anysphere.cursor.png
-EOF
+    print_text "${BLUE}${BOLD}[3/3]${RESET} ${YELLOW}Applying '--no-sandbox' flag to desktop launcher...${RESET}"
+    local desktop_file="/usr/share/applications/cursor.desktop"
     
-    chmod +x "$INSTALL_DIR/AppRun"
-    chmod +x "$DESKTOP_FILE"
-    update-desktop-database &> /dev/null || true
+    if [ -f "$desktop_file" ]; then
+        # Modify the main Exec line
+        $use_sudo sed -i 's|^Exec=/usr/share/cursor/cursor|Exec=/usr/share/cursor/cursor --no-sandbox %F|' "$desktop_file"
+        
+        # Modify the "New Empty Window" action Exec line
+        $use_sudo sed -i 's|^Exec=/usr/share/cursor/cursor --new-window|Exec=/usr/share/cursor/cursor --no-sandbox --new-window %F|' "$desktop_file"
+        
+        # Refresh the desktop database
+        $use_sudo update-desktop-database &> /dev/null || true
+        print_text "${GREEN}${BOLD}[SUCCESS] Desktop file patched.${RESET}"
+    else
+        print_text "${YELLOW}${BOLD}[WARNING] Could not find $desktop_file to modify.${RESET}"
+    fi
+
     
     cleanup
     
@@ -824,15 +574,13 @@ EOF
     echo
     print_text "${CYAN}[INFO] You can launch Cursor:${RESET}"
     print_text "  ${BOLD}• From application menu:${RESET} Search for 'Cursor'"
-    print_text "  ${BOLD}• From terminal:${RESET} Run ${BOLD}cursor --no-sandbox${RESET}"
+    print_text "  ${BOLD}• From terminal:${RESET} Run ${BOLD}cursor${RESET}"
     echo
-    print_text "${YELLOW}Note: The --no-sandbox flag is required for running as root.${RESET}"
-    print_text "${YELLOW}For better security, consider running as non-root user.${RESET}"
 }
 
 # Function to check if Cursor is installed
 is_cursor_installed() {
-    if [[ ! -d "$INSTALL_DIR" ]]; then
+    if ! dpkg -s cursor &> /dev/null; then
         print_text "${RED}${BOLD}[ERROR] Cursor is not installed on this system.${RESET}"
         return 1
     fi
@@ -843,16 +591,24 @@ is_cursor_installed() {
 uninstall_cursor() {
     display_header
     
+    # This installer is for .deb packages only
+    if ! check_deb_system; then
+        print_text "${YELLOW}Press Enter to return to the main menu...${RESET}"
+        read -r
+        return 1
+    fi
+    
+    local use_sudo=""
+    if [[ $EUID -ne 0 ]]; then
+        use_sudo="sudo"
+    fi
+
     if ! is_cursor_installed; then
-        print_text "${YELLOW}${BOLD}[INFO] Would you like to force removal of any residual files? (y/n):${RESET} "
-        echo -n ""
-        read -r choice
-        if [[ "$choice" != "y" && "$choice" != "Y" ]]; then
-            return
-        fi
+        print_text "${YELLOW}${BOLD}[INFO] Nothing to uninstall.${RESET}"
+        return
     else
         print_text "${RED}${BOLD}WARNING: Uninstalling Cursor AI Editor${RESET}"
-        print_text "${YELLOW}This will remove Cursor and all its data from your system.${RESET}"
+        print_text "${YELLOW}This will remove the 'cursor' package from your system.${RESET}"
         print_text "${YELLOW}${BOLD}Are you sure you want to continue? (y/n):${RESET} "
         echo -n ""
         read -r choice
@@ -862,15 +618,11 @@ uninstall_cursor() {
         fi
     fi
     
-    print_text "${BLUE}${BOLD}[1/3]${RESET} ${YELLOW}Removing installation directory...${RESET}"
-    rm -rf "$INSTALL_DIR"
+    print_text "${BLUE}${BOLD}[1/2]${RESET} ${YELLOW}Removing 'cursor' package...${RESET}"
+    $use_sudo apt remove -y cursor
     
-    print_text "${BLUE}${BOLD}[2/3]${RESET} ${YELLOW}Removing symbolic link...${RESET}"
-    rm -f "$SYMLINK_PATH"
-    
-    print_text "${BLUE}${BOLD}[3/3]${RESET} ${YELLOW}Removing desktop shortcut...${RESET}"
-    rm -f "$DESKTOP_FILE"
-    update-desktop-database &> /dev/null || true
+    print_text "${BLUE}${BOLD}[2/2]${RESET} ${YELLOW}Cleaning up dependencies...${RESET}"
+    $use_sudo apt autoremove -y
     
     echo
     print_text "${GREEN}${BOLD}Cursor AI Editor has been successfully removed!${RESET}"
@@ -887,6 +639,13 @@ uninstall_cursor() {
 update_cursor() {
     display_header
     
+    # This installer is for .deb packages only
+    if ! check_deb_system; then
+        print_text "${YELLOW}Press Enter to return to the main menu...${RESET}"
+        read -r
+        return 1
+    fi
+
     if ! is_cursor_installed; then
         print_text "${YELLOW}${BOLD}[INFO] Would you like to install Cursor instead? (y/n):${RESET} "
         echo -n ""
@@ -904,10 +663,10 @@ update_cursor() {
     
     # Get installed version
     local installed_version=""
-    if [[ -f "$INSTALL_DIR/version" ]]; then
-        installed_version=$(cat "$INSTALL_DIR/version" 2>/dev/null)
+    if dpkg -s cursor &> /dev/null; then
+        installed_version=$(dpkg -s cursor | grep '^Version:' | awk '{ print $2 }')
     else
-        installed_version=$(grep -oP 'X-AppImage-Version=\K.*' "$DESKTOP_FILE" 2>/dev/null || echo "unknown")
+        installed_version="unknown"
     fi
     
     print_text "${CYAN}${BOLD}[INFO] Installed version: ${BOLD}$installed_version${RESET}"
@@ -926,129 +685,8 @@ update_cursor() {
     # Directly install the latest version (overwrite existing installation)
     print_text "${YELLOW}${BOLD}[INFO] Updating Cursor AI Editor from v$installed_version to v$APP_VERSION...${RESET}"
     
-    # Create temporary directory for downloading new version
-    create_temp_dir || return 1
-    
-    print_text "${BLUE}${BOLD}[1/4]${RESET} ${YELLOW}Downloading Cursor AI Editor v${APP_VERSION} for ${ARCH}...${RESET}"
-    wget -q --timeout=30 --tries=3 --show-progress -O Cursor.AppImage "$APPIMAGE_URL" || {
-        print_text "${RED}${BOLD}[ERROR] Download failed. Please check your internet connection.${RESET}"
-        print_text "${YELLOW}${BOLD}[INFO] You can try downloading the file manually from:${RESET}"
-        print_text "${CYAN}$APPIMAGE_URL${RESET}"
-        cleanup
-        return 1
-    }
-    
-    print_text "${BLUE}${BOLD}[2/4]${RESET} ${YELLOW}Making AppImage executable...${RESET}"
-    chmod +x Cursor.AppImage || {
-        print_text "${RED}${BOLD}[ERROR] Failed to set executable permissions.${RESET}"
-        cleanup
-        return 1
-    }
-    
-    print_text "${BLUE}${BOLD}[3/4]${RESET} ${YELLOW}Extracting AppImage...${RESET}"
-    ./Cursor.AppImage --appimage-extract > /dev/null 2>&1 &
-    extraction_pid=$!
-    
-    # Add a timeout for extraction (120 seconds)
-    local timeout=120
-    local start_time=$(date +%s)
-    local current_time=0
-    local elapsed_time=0
-    local delay=0.1
-    local spinstr='⣾⣽⣻⢿⡿⣟⣯⣷'
-    
-    echo -n ""
-    
-    while ps -p "$extraction_pid" &> /dev/null; do
-        local temp=${spinstr#?}
-        printf " ${CYAN}${BOLD}[%c]${RESET}  " "$spinstr"
-        local spinstr=$temp${spinstr%"$temp"}
-        sleep $delay
-        printf "\b\b\b\b\b\b\b\b\b"
-        
-        current_time=$(date +%s)
-        elapsed_time=$((current_time - start_time))
-        
-        if [ $elapsed_time -gt $timeout ]; then
-            print_text "${RED}${BOLD}[ERROR] Extraction timed out after $timeout seconds.${RESET}"
-            kill -9 $extraction_pid 2>/dev/null || true
-            cleanup
-            return 1
-        fi
-    done
-    printf "         \b\b\b\b\b\b\b\b\b"
-    
-    if [[ ! -d "squashfs-root" ]]; then
-        print_text "${RED}${BOLD}[ERROR] Extraction failed.${RESET}"
-        cleanup
-        return 1
-    fi
-    
-    print_text "${BLUE}${BOLD}[4/4]${RESET} ${YELLOW}Installing new version...${RESET}"
-    
-    # Backup existing desktop file if it has custom modifications
-    if [[ -f "$DESKTOP_FILE" ]]; then
-        cp "$DESKTOP_FILE" "$DESKTOP_FILE.bak" 2>/dev/null
-    fi
-    
-    # Replace installation files
-    rm -rf "$INSTALL_DIR"/* || {
-        print_text "${RED}${BOLD}[ERROR] Could not clean installation directory. Check permissions.${RESET}"
-        cleanup
-        return 1
-    }
-    
-    cp -r squashfs-root/* "$INSTALL_DIR/" || {
-        print_text "${RED}${BOLD}[ERROR] Failed to copy files to installation directory.${RESET}"
-        cleanup
-        return 1
-    }
-    
-    # Ensure the symbolic link is updated
-    ln -sf "$INSTALL_DIR/AppRun" "$SYMLINK_PATH" || {
-        print_text "${RED}${BOLD}[WARNING] Failed to update symbolic link.${RESET}"
-    }
-    
-    # Update desktop entry
-    print_text "${YELLOW}${BOLD}[INFO] Updating desktop shortcut...${RESET}"
-    cat <<EOF > "$DESKTOP_FILE"
-[Desktop Entry]
-Name=Cursor
-Comment=The AI-powered Code Editor
-GenericName=Text Editor
-Exec=cursor --no-sandbox %F
-Icon=$INSTALL_DIR/co.anysphere.cursor.png
-Type=Application
-StartupNotify=true
-StartupWMClass=Cursor
-Categories=TextEditor;Development;IDE;Utility;
-MimeType=text/plain;application/x-cursor-workspace;
-Actions=new-empty-window;
-Keywords=cursor;code;editor;programming;developer;ai;
-X-AppImage-Version=$APP_VERSION
-
-[Desktop Action new-empty-window]
-Name=New Empty Window
-Exec=cursor --no-sandbox --new-window %F
-Icon=$INSTALL_DIR/co.anysphere.cursor.png
-EOF
-    
-    chmod +x "$INSTALL_DIR/AppRun"
-    chmod +x "$DESKTOP_FILE"
-    update-desktop-database &> /dev/null || true
-    
-    cleanup
-    
-    # Update complete
-    echo
-    print_text "${GREEN}${BOLD}Cursor AI Editor successfully updated to v${APP_VERSION}!${RESET}"
-    
-    local update_content=(
-        ""
-        "${MAGENTA}${BOLD}UPDATE COMPLETE${RESET}"
-        ""
-    )
-    print_box "${update_content[@]}"
+    # The installation function handles updates automatically
+    install_cursor
 }
 
 # Function to show about information
@@ -1073,7 +711,7 @@ show_about() {
     print_text "  • ${CYAN}Request ID reset for privacy${RESET}"
     echo
     print_text "${BOLD}Installer Information:${RESET}"
-    print_text "  • ${CYAN}Script version: 3.0${RESET}"
+    print_text "  • ${CYAN}Script version: 3.2 (DEB Edition)${RESET}"
     print_text "  • ${CYAN}Author: Mahesh Technicals${RESET}"
     print_text "  • ${CYAN}App version: $APP_VERSION${RESET}"
     print_text "  • ${CYAN}Architecture: $ARCH${RESET}"
@@ -1088,12 +726,12 @@ show_help() {
     print_text "${CYAN}${BOLD}Usage:${RESET} $0 [OPTION]"
     echo
     print_text "${BOLD}Options:${RESET}"
-    print_text "  ${CYAN}-i, --install${RESET}    Install Cursor AI Editor"
-    print_text "  ${CYAN}-u, --uninstall${RESET}  Uninstall Cursor AI Editor"
-    print_text "  ${CYAN}-p, --update${RESET}     Update Cursor AI Editor"
-    print_text "  ${CYAN}-r, --reset-ids${RESET}  Reset Cursor telemetry & request IDs"
-    print_text "  ${CYAN}-a, --about${RESET}      Show information about Cursor"
-    print_text "  ${CYAN}-h, --help${RESET}       Display this help message"
+    print_text "  ${CYAN}-i, --install${RESET}   Install Cursor AI Editor"
+    print_text "  ${CYAN}-u, --uninstall${RESET} Uninstall Cursor AI Editor"
+    print_text "  ${CYAN}-p, --update${RESET}    Update Cursor AI Editor"
+    print_text "  ${CYAN}-r, --reset-ids${RESET} Reset Cursor telemetry & request IDs"
+    print_text "  ${CYAN}-a, --about${RESET}     Show information about Cursor"
+    print_text "  ${CYAN}-h, --help${RESET}      Display this help message"
     echo
     print_text "${YELLOW}If no option is provided, the interactive menu will be displayed.${RESET}"
 }
@@ -1523,12 +1161,8 @@ EOF
 display_status_table() {
     # Get installed version if available
     local installed_version="Not installed yet"
-    if [[ -d "$INSTALL_DIR" ]]; then
-        if [[ -f "$INSTALL_DIR/version" ]]; then
-            installed_version=$(cat "$INSTALL_DIR/version" 2>/dev/null)
-        else
-            installed_version=$(grep -oP 'X-AppImage-Version=\K.*' "$DESKTOP_FILE" 2>/dev/null || echo "Unknown")
-        fi
+    if dpkg -s cursor &> /dev/null; then
+        installed_version=$(dpkg -s cursor | grep '^Version:' | awk '{ print $2 }')
     fi
 
     # Fetch latest version
@@ -1625,7 +1259,7 @@ display_status_table() {
     
     # Color for installed version (red if not installed)
     local version_color=$GREEN
-    if [[ "$installed_version" == "Not installed yet" || "$installed_version" == "Unknown" ]]; then
+    if [[ "$installed_version" == "Not installed yet" ]]; then
         version_color=$RED
     fi
     
@@ -1739,6 +1373,13 @@ while true; do
                 continue
             fi
             
+            # Check if it's a debian system
+            if ! check_deb_system; then
+                print_text "${YELLOW}Press Enter to return to the main menu...${RESET}"
+                read -r
+                continue
+            fi
+
             case "$choice" in
                 1)
                     # Call the install_cursor function which handles dependency checks and installation
