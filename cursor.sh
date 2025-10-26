@@ -4,7 +4,7 @@
 #                 🚀 Cursor AI Editor Installer & Uninstaller 🚀                 #
 #                                                                              #
 #                        ✨ Author: Mahesh Technicals ✨                         #
-#                        🌟 Version: 3.7 (DEB Edition) 🌟                       #
+#                        🌟 Version: 3.9 (DEB Edition) 🌟                       #
 #                📌 Modern & Stylish UI with Error Handling                #
 #                                                                              #
 ################################################################################
@@ -15,7 +15,7 @@ APP_VERSION="0.0.0" # Default version, will be updated by fetch_download_urls
 ARCH=$(uname -m)
 DEB_URL=""
 
-# NEW: API endpoints for fetching version and download URL
+# API endpoints for fetching version and download URL
 API_URL_BASE="https://www.cursor.com/api/download?releaseTrack=stable"
 API_URL=""
 
@@ -26,12 +26,17 @@ elif [[ "$ARCH" == "x86_64" ]]; then
     API_URL="${API_URL_BASE}&platform=linux-x64"
 else
     echo -e "\e[31m[ERROR] Unsupported architecture: $ARCH\e[0m"
-    # We'll handle this properly later
+    # Exit if architecture is unsupported early on
+    exit 1
 fi
 
 # Determine the actual user's home directory even when run with sudo
 if [ "$SUDO_USER" ] && [ "$EUID" -eq 0 ]; then
-    ACTUAL_HOME=$(eval echo ~$SUDO_USER)
+    ACTUAL_HOME=$(getent passwd "$SUDO_USER" | cut -d: -f6)
+    # Fallback if getent fails
+    if [ -z "$ACTUAL_HOME" ]; then
+        ACTUAL_HOME=$(eval echo ~$SUDO_USER)
+    fi
 else
     ACTUAL_HOME=$HOME
 fi
@@ -63,7 +68,9 @@ print_box() {
 
     # Find the longest line
     for line in "${content[@]}"; do
-        line_length=${#line}
+        # Strip ANSI codes for length calculation
+        local stripped_line=$(echo -e "$line" | sed 's/\x1b\[[0-9;]*m//g')
+        line_length=${#stripped_line}
         if [[ $line_length -gt $max_length ]]; then
             max_length=$line_length
         fi
@@ -71,6 +78,8 @@ print_box() {
 
     # Add padding for box borders
     max_length=$((max_length + 8))
+    # Ensure minimum width for short messages
+    [[ $max_length -lt 30 ]] && max_length=30
 
     # Create top border
     local top_border="${CYAN}${BOLD}╔"
@@ -90,7 +99,10 @@ print_box() {
     echo -e "$top_border"
 
     for line in "${content[@]}"; do
-        local padding=$((max_length - ${#line} - 2))
+         local stripped_line=$(echo -e "$line" | sed 's/\x1b\[[0-9;]*m//g')
+        local padding=$((max_length - ${#stripped_line} - 2))
+        # Ensure padding is not negative
+        [[ $padding -lt 0 ]] && padding=0
         local right_padding=$((padding / 2))
         local left_padding=$((padding - right_padding))
 
@@ -99,7 +111,7 @@ print_box() {
             padded_line+=" "
         done
 
-        padded_line+="$line"
+        padded_line+="$line" # Use original line with colors
 
         for ((i=0; i<right_padding; i++)); do
             padded_line+=" "
@@ -131,6 +143,10 @@ check_deb_system() {
         print_text "${RED}${BOLD}[ERROR] Package managers 'apt' or 'apt-get' not found.${RESET}"
         return 1
     fi
+    if ! command -v dpkg &> /dev/null; then
+        print_text "${RED}${BOLD}[ERROR] 'dpkg' command not found. This system might not be fully Debian-compatible.${RESET}"
+        return 1
+    fi
     return 0
 }
 
@@ -158,12 +174,13 @@ install_dependencies() {
         print_text "${YELLOW}${BOLD}[INFO] Not running as root, will use sudo for installations${RESET}"
     fi
 
+    # FIX: Use `env` to set DEBIAN_FRONTEND correctly with sudo
     if command -v apt &> /dev/null; then
         print_text "${BLUE}${BOLD}[INFO] Using apt package manager...${RESET}"
-        $use_sudo apt update -qq && $use_sudo apt install -y "${missing_deps[@]}"
+        $use_sudo env DEBIAN_FRONTEND=noninteractive apt update -qq && $use_sudo env DEBIAN_FRONTEND=noninteractive apt install -y "${missing_deps[@]}"
     elif command -v apt-get &> /dev/null; then
         print_text "${BLUE}${BOLD}[INFO] Using apt-get package manager...${RESET}"
-        $use_sudo apt-get update -qq && $use_sudo apt-get install -y "${missing_deps[@]}"
+        $use_sudo env DEBIAN_FRONTEND=noninteractive apt-get update -qq && $use_sudo env DEBIAN_FRONTEND=noninteractive apt-get install -y "${missing_deps[@]}"
     fi
 
     # Verify installation
@@ -192,6 +209,7 @@ install_dependencies() {
         if command -v python3 &> /dev/null || command -v python &> /dev/null; then
             if command -v pip &> /dev/null || command -v pip3 &> /dev/null; then
                 print_text "${BLUE}${BOLD}[INFO] Attempting to install jq via pip...${RESET}"
+                # If pip needs sudo, it will likely ask for password here
                 $use_sudo pip install jq || $use_sudo pip3 install jq
             fi
         fi
@@ -293,7 +311,7 @@ display_header() {
         "${CYAN}${BOLD}Installation & Management${RESET}"
         ""
         "${CYAN}${BOLD}by Mahesh Technicals${RESET}"
-        "${CYAN}${BOLD}Version 3.7 (DEB Edition)${RESET}"
+        "${CYAN}${BOLD}Version 3.9 (DEB Edition)${RESET}"
         ""
     )
 
@@ -315,15 +333,14 @@ create_temp_dir() {
 # Function to clean up temporary files
 cleanup() {
     print_text "${YELLOW}${BOLD}[INFO] Cleaning up temporary files...${RESET}"
-    cd / || true
+    cd / || true # Go back to root before removing temp dir
     rm -rf "$TEMP_DIR"
 }
 
 # Function to check if Cursor is already installed
 check_installation() {
-    # FIX: Check for the specific "installed" status.
-    # `dpkg -s` returns 0 even if package is 'removed' but not 'purged'.
-    if dpkg -s cursor 2>/dev/null | grep -q "Status: install ok installed"; then
+    # Check for the specific "installed" status.
+    if dpkg -s cursor 2>/dev/null | grep -q "^Status: install ok installed"; then
         print_text "${YELLOW}${BOLD}[WARNING] Cursor is already installed.${RESET}"
         print_text "${YELLOW}${BOLD}[INFO] Would you like to reinstall? (y/n):${RESET} "
         echo -n ""
@@ -366,7 +383,7 @@ fetch_download_urls() {
 
     # Check if curl or wget is available
     if command -v curl &> /dev/null; then
-        # FIX: Added -L flag to follow redirects
+        # Added -L flag to follow redirects
         local response=$(curl -sL --connect-timeout 10 --max-time 15 "$API_URL")
     elif command -v wget &> /dev/null; then
         # wget follows redirects by default
@@ -381,25 +398,30 @@ fetch_download_urls() {
         print_text "${RED}${BOLD}[ERROR] Failed to get a response from version server.${RESET}"
         return 1
     fi
+    # Check if response looks like JSON
+    if ! echo "$response" | grep -q '{.*}'; then
+        print_text "${RED}${BOLD}[ERROR] Invalid response received from API (not JSON).${RESET}"
+        print_text "${RED}Response: $response${RESET}"
+        return 1
+    fi
+
 
     # Check if jq is available for JSON parsing
     if command -v jq &> /dev/null; then
         # Parse JSON using jq
         APP_VERSION=$(echo "$response" | jq -r '.version')
-        # FIX: Extract from debUrl field
         DEB_URL=$(echo "$response" | jq -r '.debUrl')
     else
         # Fallback to grep and sed if jq is not available
         print_text "${YELLOW}${BOLD}[WARNING] jq not found. Using fallback method for JSON parsing.${RESET}"
         APP_VERSION=$(echo "$response" | grep -o '"version":"[^"]*"' | head -1 | sed 's/"version":"//;s/"//')
-        # FIX: Extract from debUrl field using grep/sed
         DEB_URL=$(echo "$response" | grep -o '"debUrl":"[^"]*"' | head -1 | sed 's/"debUrl":"//;s/"//')
     fi
 
     # Verify that we got valid values
     if [[ -z "$APP_VERSION" || "$APP_VERSION" == "null" || -z "$DEB_URL" || "$DEB_URL" == "null" ]]; then
         print_text "${RED}${BOLD}[ERROR] Failed to parse version information from API.${RESET}"
-        print_text "${RED}Response: $response${RESET}"
+        print_text "${RED}Raw Response: $response${RESET}"
         # Make sure DEB_URL is empty if parsing failed
         DEB_URL=""
         return 1
@@ -471,8 +493,8 @@ install_cursor() {
     # After all dependencies are installed, check specifically for jq
     if ! command -v jq &> /dev/null; then
         print_text "${YELLOW}${BOLD}[INFO] jq installation not detected. Trying direct installation methods...${RESET}"
-
-        $use_sudo apt update && $use_sudo apt install -y jq
+        # FIX: Use `env` to set DEBIAN_FRONTEND correctly with sudo
+        $use_sudo env DEBIAN_FRONTEND=noninteractive apt update && $use_sudo env DEBIAN_FRONTEND=noninteractive apt install -y jq
 
         # Check if jq is now available
         if ! command -v jq &> /dev/null; then
@@ -492,56 +514,71 @@ install_cursor() {
         return
     fi
     create_temp_dir
+    # Ensure cleanup happens even if the script exits unexpectedly
+    trap cleanup EXIT INT TERM
 
     # Fetch latest version and download URLs
     if ! fetch_download_urls; then
         print_text "${RED}${BOLD}[ERROR] Could not fetch download information. Installation aborted.${RESET}"
-        cleanup
+        # Cleanup is handled by trap
         return 1
     fi
 
     if [[ -z "$DEB_URL" ]]; then
          print_text "${RED}${BOLD}[ERROR] Could not determine download URL. Installation aborted.${RESET}"
-         cleanup
+         # Cleanup is handled by trap
          return 1
     fi
 
     print_text "${BLUE}${BOLD}[1/3]${RESET} ${YELLOW}Downloading Cursor AI Editor v${APP_VERSION} for ${ARCH}...${RESET}"
-    wget -q --timeout=30 --tries=3 --show-progress -O Cursor.deb "$DEB_URL" || {
+    wget -q --timeout=60 --tries=3 --show-progress -O Cursor.deb "$DEB_URL" || {
         print_text "${RED}${BOLD}[ERROR] Download failed. Please check your internet connection.${RESET}"
         print_text "${YELLOW}${BOLD}[INFO] You can try downloading the file manually from:${RESET}"
         print_text "${CYAN}$DEB_URL${RESET}"
-        cleanup
+        # Cleanup is handled by trap
         return 1
     }
 
-    print_text "${BLUE}${BOLD}[2/3]${RESET} ${YELLOW}Installing .deb package (this may take a moment)...${RESET}"
+    print_text "${BLUE}${BOLD}[2/3]${RESET} ${YELLOW}Installing .deb package (non-interactive mode)...${RESET}" # Updated text
 
+    # FIX: Use `env` to correctly set DEBIAN_FRONTEND for the apt/dpkg command
     # Use apt install to handle dependencies automatically
-    if ! $use_sudo apt install -y ./Cursor.deb; then
-         print_text "${RED}${BOLD}[ERROR] Failed to install .deb package.${RESET}"
-         print_text "${YELLOW}${BOLD}[INFO] Trying with 'dpkg -i' and 'apt -f install'...${RESET}"
-         $use_sudo dpkg -i ./Cursor.deb || $use_sudo apt --fix-broken install -y
+    if ! $use_sudo env DEBIAN_FRONTEND=noninteractive apt install -y ./Cursor.deb; then
+         print_text "${RED}${BOLD}[ERROR] Failed to install .deb package using 'apt install'.${RESET}"
+         print_text "${YELLOW}${BOLD}[INFO] Trying fallback with 'dpkg -i' and 'apt --fix-broken install'...${RESET}"
+         # Run dpkg non-interactively if possible
+         $use_sudo env DEBIAN_FRONTEND=noninteractive dpkg -i ./Cursor.deb || $use_sudo env DEBIAN_FRONTEND=noninteractive apt --fix-broken install -y # Fixed here too
 
          # Final check
-         if ! dpkg -s cursor 2>/dev/null | grep -q "Status: install ok installed"; then
-            print_text "${RED}${BOLD}[ERROR] Installation failed. Please try installing manually.${RESET}"
-            cleanup
+         if ! dpkg -s cursor 2>/dev/null | grep -q "^Status: install ok installed"; then
+            print_text "${RED}${BOLD}[ERROR] Installation failed even with fallback. Please try installing manually.${RESET}"
+            # Cleanup is handled by trap
             return 1
          fi
+         print_text "${GREEN}${BOLD}[SUCCESS] Installed using fallback method.${RESET}"
     fi
+
 
     print_text "${BLUE}${BOLD}[3/3]${RESET} ${YELLOW}Applying '--no-sandbox' flag to desktop launcher...${RESET}"
     local desktop_file="/usr/share/applications/cursor.desktop"
 
     if [ -f "$desktop_file" ]; then
-        # Modify the main Exec line, making sure not to add the flag multiple times
+        # Use grep -q to check if the flag already exists
         if ! grep -q -- '--no-sandbox' "$desktop_file"; then
-             $use_sudo sed -i 's|^Exec=/usr/share/cursor/cursor.*|Exec=/usr/share/cursor/cursor --no-sandbox %F|' "$desktop_file"
-             $use_sudo sed -i 's|^Exec=/usr/share/cursor/cursor --new-window.*|Exec=/usr/share/cursor/cursor --no-sandbox --new-window %F|' "$desktop_file"
-             # Refresh the desktop database
-             $use_sudo update-desktop-database &> /dev/null || true
-             print_text "${GREEN}${BOLD}[SUCCESS] Desktop file patched.${RESET}"
+             # Make sure the Exec lines are exactly as expected before replacing
+             # Use a temporary file for sed to avoid issues with sudo and redirection
+             local temp_sed_script=$(mktemp)
+             echo "s|^Exec=/usr/share/cursor/cursor.*|Exec=/usr/share/cursor/cursor --no-sandbox %F|" > "$temp_sed_script"
+             echo "s|^Exec=/usr/share/cursor/cursor --new-window.*|Exec=/usr/share/cursor/cursor --no-sandbox --new-window %F|" >> "$temp_sed_script"
+
+             if $use_sudo sed -i -f "$temp_sed_script" "$desktop_file"; then
+                 # Refresh the desktop database
+                 $use_sudo update-desktop-database &> /dev/null || true
+                 print_text "${GREEN}${BOLD}[SUCCESS] Desktop file patched.${RESET}"
+             else
+                 print_text "${RED}${BOLD}[ERROR] Failed to patch desktop file with sed.${RESET}"
+             fi
+             rm -f "$temp_sed_script"
         else
              print_text "${YELLOW}${BOLD}[INFO] '--no-sandbox' flag already present in desktop file. Skipping patch.${RESET}"
         fi
@@ -550,7 +587,10 @@ install_cursor() {
     fi
 
 
-    cleanup
+    # Cleanup is handled by trap
+    trap - EXIT INT TERM # Disable trap as we finished successfully
+
+    cleanup # Perform manual cleanup now
 
     # Installation complete
     echo
@@ -572,13 +612,30 @@ install_cursor() {
 
 # Function to check if Cursor is installed
 is_cursor_installed() {
-    # FIX: Check for the specific "installed" status.
-    if ! dpkg -s cursor 2>/dev/null | grep -q "Status: install ok installed"; then
-        print_text "${RED}${BOLD}[ERROR] Cursor is not installed on this system.${RESET}"
+    # Check for the specific "installed" status.
+    if ! dpkg -s cursor 2>/dev/null | grep -q "^Status: install ok installed"; then
+        # Don't print error if it's just a check, only if it's expected to be installed
+        # print_text "${RED}${BOLD}[ERROR] Cursor is not installed on this system.${RESET}"
         return 1
     fi
     return 0
 }
+
+# Function to display message if not installed (used by uninstall/update)
+check_if_installed_and_error() {
+     if ! is_cursor_installed; then
+        # Check if remnants exist
+        if dpkg -s cursor 2>/dev/null | grep -q "^Status: deinstall ok config-files"; then
+             print_text "${YELLOW}${BOLD}[INFO] Cursor package is removed, but configuration files remain.${RESET}"
+             return 2 # Special return code for remnants
+        else
+             print_text "${RED}${BOLD}[ERROR] Cursor is not installed on this system.${RESET}"
+             return 1 # Not installed at all
+        fi
+     fi
+     return 0 # Is installed
+}
+
 
 # Function to uninstall Cursor
 uninstall_cursor() {
@@ -596,24 +653,28 @@ uninstall_cursor() {
         use_sudo="sudo"
     fi
 
-    if ! is_cursor_installed; then
-        # ADDED CHECK: See if it's 'removed' but not 'purged'
-        if dpkg -s cursor 2>/dev/null | grep -q "Status: deinstall ok config-files"; then
-            print_text "${YELLOW}${BOLD}[INFO] Remnants of a previous installation found.${RESET}"
-            print_text "${YELLOW}${BOLD}Do you want to purge these remnants? (y/n):${RESET} "
-            echo -n ""
-            read -r purge_choice
-            if [[ "$purge_choice" != "y" && "$purge_choice" != "Y" ]]; then
-                print_text "${YELLOW}${BOLD}[INFO] Cleanup aborted.${RESET}"
-                return
-            fi
-        else
-            # Truly not installed
-            return
-        fi
+    local install_status
+    check_if_installed_and_error
+    install_status=$?
+
+    if [[ $install_status -eq 1 ]]; then
+         # Truly not installed
+         print_text "${YELLOW}${BOLD}[INFO] Nothing to uninstall.${RESET}"
+         return
+    elif [[ $install_status -eq 2 ]]; then
+         # Remnants exist
+         print_text "${YELLOW}${BOLD}Do you want to purge these remnants? (y/n):${RESET} "
+         echo -n ""
+         read -r purge_choice
+         if [[ "$purge_choice" != "y" && "$purge_choice" != "Y" ]]; then
+             print_text "${YELLOW}${BOLD}[INFO] Cleanup aborted.${RESET}"
+             return
+         fi
+         # Proceed to purge
     else
+        # Is installed
         print_text "${RED}${BOLD}WARNING: Uninstalling Cursor AI Editor${RESET}"
-        print_text "${YELLOW}This will remove the 'cursor' package and its system configuration files.${RESET}" # Updated text
+        print_text "${YELLOW}This will remove the 'cursor' package and its system configuration files.${RESET}"
         print_text "${YELLOW}${BOLD}Are you sure you want to continue? (y/n):${RESET} "
         echo -n ""
         read -r choice
@@ -623,15 +684,26 @@ uninstall_cursor() {
         fi
     fi
 
-    print_text "${BLUE}${BOLD}[1/2]${RESET} ${YELLOW}Purging 'cursor' package...${RESET}" # Updated text
-    # FIX: Use 'purge' to remove package and config files
-    $use_sudo apt purge -y cursor
+
+    print_text "${BLUE}${BOLD}[1/2]${RESET} ${YELLOW}Purging 'cursor' package...${RESET}"
+    # FIX: Use `env` to set DEBIAN_FRONTEND correctly with sudo
+    if ! $use_sudo env DEBIAN_FRONTEND=noninteractive apt purge -y cursor; then
+         print_text "${RED}${BOLD}[ERROR] Failed to purge cursor package.${RESET}"
+         # Attempt to continue with autoremove anyway
+    fi
+
 
     print_text "${BLUE}${BOLD}[2/2]${RESET} ${YELLOW}Cleaning up dependencies...${RESET}"
-    $use_sudo apt autoremove -y
+    $use_sudo env DEBIAN_FRONTEND=noninteractive apt autoremove -y
 
     echo
-    print_text "${GREEN}${BOLD}Cursor AI Editor has been successfully purged!${RESET}" # Updated text
+    # Check final status
+    if ! dpkg -s cursor &> /dev/null; then
+         print_text "${GREEN}${BOLD}Cursor AI Editor has been successfully purged!${RESET}"
+    else
+         print_text "${YELLOW}${BOLD}[WARNING] 'apt purge' completed, but dpkg still reports the package. Manual check might be needed.${RESET}"
+    fi
+
 
     local uninstall_content=(
         ""
@@ -652,8 +724,14 @@ update_cursor() {
         return 1
     fi
 
-    if ! is_cursor_installed; then
-        print_text "${YELLOW}${BOLD}[INFO] Would you like to install Cursor instead? (y/n):${RESET} "
+    local install_status
+    check_if_installed_and_error
+    install_status=$?
+
+    if [[ $install_status -ne 0 ]]; then
+        # Not installed or only remnants exist
+        print_text "${YELLOW}${BOLD}[INFO] Cursor is not fully installed.${RESET}"
+        print_text "${YELLOW}${BOLD}[INFO] Would you like to install it now? (y/n):${RESET} "
         echo -n ""
         read -r choice
         if [[ "$choice" == "y" || "$choice" == "Y" ]]; then
@@ -673,17 +751,19 @@ update_cursor() {
     # Get installed version
     local installed_version=""
     local full_installed_version=""
-    # FIX: Check for the specific "installed" status.
-    if dpkg -s cursor 2>/dev/null | grep -q "Status: install ok installed"; then
+    # Check for the specific "installed" status.
+    if dpkg -s cursor 2>/dev/null | grep -q "^Status: install ok installed"; then
         full_installed_version=$(dpkg -s cursor | grep '^Version:' | awk '{ print $2 }')
         # Extract only the base version number (before the hyphen)
         installed_version=$(echo "$full_installed_version" | cut -d'-' -f1)
     else
+        # This case should ideally not be reached due to the check at the start
+        print_text "${RED}${BOLD}[ERROR] Could not determine installed version unexpectedly.${RESET}"
         installed_version="unknown"
     fi
 
     print_text "${CYAN}${BOLD}[INFO] Installed version: ${BOLD}$installed_version${RESET}"
-    print_text "${CYAN}${BOLD}[INFO] Latest version: ${BOLD}$APP_VERSION${RESET}"
+    print_text "${CYAN}${BOLD}[INFO] Latest version:    ${BOLD}$APP_VERSION${RESET}" # Aligned output
 
     # Compare base versions
     if [[ "$installed_version" == "$APP_VERSION" ]]; then
@@ -711,6 +791,8 @@ show_about() {
     if [[ "$APP_VERSION" == "0.0.0" ]]; then
         fetch_download_urls > /dev/null 2>&1 || true # Ignore errors here, just display defaults
     fi
+    local display_version="$APP_VERSION"
+    [[ "$display_version" == "0.0.0" ]] && display_version="[Fetching failed]"
 
 
     print_text "${CYAN}${BOLD}About Cursor AI Editor${RESET}"
@@ -728,9 +810,9 @@ show_about() {
     print_text "  • ${CYAN}Request ID reset for privacy${RESET}"
     echo
     print_text "${BOLD}Installer Information:${RESET}"
-    print_text "  • ${CYAN}Script version: 3.7 (DEB Edition)${RESET}"
+    print_text "  • ${CYAN}Script version: 3.9 (DEB Edition)${RESET}"
     print_text "  • ${CYAN}Author: Mahesh Technicals${RESET}"
-    print_text "  • ${CYAN}Latest App version: ${APP_VERSION:-[Fetching failed]}${RESET}" # Show version or fallback
+    print_text "  • ${CYAN}Latest App version: ${display_version}${RESET}" # Show version or fallback
     print_text "  • ${CYAN}Architecture: $ARCH${RESET}"
     echo
     print_text "${YELLOW}Press Enter to return to the main menu...${RESET}"
@@ -822,7 +904,14 @@ generate_uuid() {
 get_clean_id() {
     local key=$1
     local file=$2
-    grep -o "\"$key\": *\"[^\"]*\"" "$file" | cut -d'"' -f4 | tr -d '\n '
+    # Use grep -oP for lookbehind/lookahead if available for more robustness
+    if grep -oP '.*' <<< "" &> /dev/null; then
+         grep -oP "(?<=\"$key\": *\")[^\"]*" "$file" | tr -d '\n ' || \
+         grep -o "\"$key\": *\"[^\"]*\"" "$file" | cut -d'"' -f4 | tr -d '\n ' # Fallback
+    else
+         grep -o "\"$key\": *\"[^\"]*\"" "$file" | cut -d'"' -f4 | tr -d '\n '
+    fi
+
 }
 
 # Function to directly fix and update the storage.json file
@@ -843,6 +932,8 @@ fix_storage_json() {
     print_text "${BLUE}${BOLD}[INFO] Creating fixed JSON with new IDs...${RESET}"
 
     # Create a new storage.json file directly
+    # Using a known-good structure might overwrite other user settings,
+    # but is safer than trying to parse/modify potentially broken JSON without robust tools.
     cat > "$CONFIG_FILE" << EOF
 {
   "telemetry.machineId": "${new_machine_id}",
@@ -851,84 +942,51 @@ fix_storage_json() {
   "telemetry.sqmId": "",
   "backupWorkspaces": {
     "workspaces": [],
-    "folders": [
-      {
-        "folderUri": "file://${HOME}/Downloads"
-      }
-    ],
-    "emptyWindows": [
-      {
-        "backupFolder": "1743309163731"
-      }
-    ]
+    "folders": [],
+    "emptyWindows": []
   },
   "profileAssociations": {
-    "workspaces": {
-      "file://${HOME}/Downloads": "__default__profile__"
-    },
+    "workspaces": {},
     "emptyWindows": {}
   },
-  "windowControlHeight": 35,
   "theme": "vs-dark",
   "themeBackground": "#1a1a1a",
-  "windowSplash": {
-    "zoomLevel": 0,
-    "baseTheme": "vs-dark",
-    "colorInfo": {
-      "foreground": "rgba(204, 204, 204, 0.87)",
-      "background": "#1a1a1a",
-      "editorBackground": "#1a1a1a",
-      "titleBarBackground": "#141414",
-      "titleBarBorder": "rgba(255, 255, 255, 0.05)",
-      "activityBarBackground": "#141414",
-      "sideBarBackground": "#14141a",
-      "sideBarBorder": "rgba(255, 255, 255, 0.05)",
-      "statusBarBackground": "#141414",
-      "statusBarBorder": "rgba(255, 255, 255, 0.05)",
-      "statusBarNoFolderBackground": "#141414"
-    },
-    "layoutInfo": {
-      "sideBarSide": "left",
-      "editorPartMinWidth": 220,
-      "titleBarHeight": 35,
-      "activityBarWidth": 0,
-      "sideBarWidth": 256,
-      "statusBarHeight": 22,
-      "windowBorder": false
-    }
-  },
   "windowsState": {
-    "lastActiveWindow": {
-      "backupPath": "${HOME}/.config/Cursor/Backups/1743309163731",
-      "uiState": {
-        "mode": 0,
-        "x": 0,
-        "y": 63,
-        "width": 1440,
-        "height": 657
-      }
-    },
     "openedWindows": []
   }
 }
 EOF
+# Simplified the structure slightly to reduce potential issues if user file is very different
 
     # Verify it's valid JSON
-    if command -v python3 >/dev/null 2>&1; then
-        if ! python3 -c "import json; json.load(open('$CONFIG_FILE'))" 2>/dev/null; then
-            print_text "${RED}${BOLD}[ERROR] Created JSON file is invalid. This is unexpected.${RESET}"
-            if [ -f "${CONFIG_FILE}.original" ]; then
-                print_text "${YELLOW}${BOLD}Restoring original file...${RESET}"
-                cp "${CONFIG_FILE}.original" "$CONFIG_FILE"
-            fi
-            return 1
+    local json_valid=false
+    if command -v jq >/dev/null 2>&1; then
+        if jq '.' "$CONFIG_FILE" > /dev/null 2>&1; then
+            json_valid=true
         fi
+    elif command -v python3 >/dev/null 2>&1; then
+        if python3 -c "import json; json.load(open('$CONFIG_FILE'))" > /dev/null 2>&1; then
+            json_valid=true
+        fi
+    else
+        # Cannot verify, assume ok
+        json_valid=true
     fi
 
-    # Get the new IDs for display
-    local new_machine_id=$(get_clean_id "telemetry.machineId" "$CONFIG_FILE")
-    local new_mac_id=$(get_clean_id "telemetry.macMachineId" "$CONFIG_FILE")
-    local new_device_id=$(get_clean_id "telemetry.devDeviceId" "$CONFIG_FILE")
+    if [ "$json_valid" = false ]; then
+        print_text "${RED}${BOLD}[ERROR] Created JSON file is invalid. This is unexpected.${RESET}"
+        if [ -f "${CONFIG_FILE}.original" ]; then
+            print_text "${YELLOW}${BOLD}Restoring original file...${RESET}"
+            cp "${CONFIG_FILE}.original" "$CONFIG_FILE"
+        fi
+        return 1
+    fi
+
+
+    # Get the new IDs for display (re-read from the potentially formatted file)
+    new_machine_id=$(get_clean_id "telemetry.machineId" "$CONFIG_FILE")
+    new_mac_id=$(get_clean_id "telemetry.macMachineId" "$CONFIG_FILE")
+    new_device_id=$(get_clean_id "telemetry.devDeviceId" "$CONFIG_FILE")
 
     # Display results
     echo
@@ -942,19 +1000,20 @@ EOF
 
     # Fix permissions if running as root
     if [ "$SUDO_USER" ] && [ "$EUID" -eq 0 ]; then
-        chown $SUDO_USER:$(id -gn $SUDO_USER) "$CONFIG_FILE"
+        chown "$SUDO_USER:$(id -gn "$SUDO_USER")" "$CONFIG_FILE"
         if [ -f "${CONFIG_FILE}.original" ]; then
-            chown $SUDO_USER:$(id -gn $SUDO_USER) "${CONFIG_FILE}.original"
+            chown "$SUDO_USER:$(id -gn "$SUDO_USER")" "${CONFIG_FILE}.original"
         fi
         print_text "${YELLOW}${BOLD}[INFO] Fixed file ownership for regular user.${RESET}"
     fi
 
     # Display backup message based on which backup exists
-    if [ -f "${CONFIG_FILE}.bak" ]; then
-        print_text "${YELLOW}Backup saved to: ${CONFIG_FILE}.bak${RESET}"
-    elif [ -f "${CONFIG_FILE}.original" ]; then
-        print_text "${YELLOW}Backup saved to: ${CONFIG_FILE}.original${RESET}"
+    if [ -f "${CONFIG_FILE}.original" ]; then # Check for .original first as it's the true original
+        print_text "${YELLOW}Original config saved to: ${CONFIG_FILE}.original${RESET}"
+    elif [ -f "${CONFIG_FILE}.bak" ]; then
+        print_text "${YELLOW}Previous config backup saved to: ${CONFIG_FILE}.bak${RESET}"
     fi
+
 
     print_text "${GREEN}${BOLD}Please restart Cursor for changes to take effect.${RESET}"
 
@@ -965,48 +1024,84 @@ EOF
     return 0
 }
 
-# Function to reset request IDs
+# Function to reset request IDs (attempts modification, falls back to overwrite)
 reset_request_ids() {
     display_header
 
     # Make sure the config directory exists
     local config_dir=$(dirname "$CONFIG_FILE")
     if [ ! -d "$config_dir" ]; then
-        print_text "${YELLOW}${BOLD}[INFO] Creating config directory: $config_dir${RESET}"
-        mkdir -p "$config_dir"
+        print_text "${YELLOW}${BOLD}[INFO] Config directory not found. Trying to create: $config_dir${RESET}"
+        # If running as root, create for the actual user
+        if [ "$SUDO_USER" ] && [ "$EUID" -eq 0 ]; then
+            sudo -u "$SUDO_USER" mkdir -p "$config_dir" || {
+                 print_text "${RED}${BOLD}[ERROR] Failed to create config directory.${RESET}"
+                 return 1
+            }
+        else
+             mkdir -p "$config_dir" || {
+                 print_text "${RED}${BOLD}[ERROR] Failed to create config directory.${RESET}"
+                 return 1
+             }
+        fi
     fi
 
     # If config file doesn't exist, create a new one
     if [ ! -f "$CONFIG_FILE" ]; then
-        print_text "${YELLOW}${BOLD}[INFO] Config file not found. Creating a new one.${RESET}"
-        touch "$CONFIG_FILE"
-        echo "{}" > "$CONFIG_FILE"
+        print_text "${YELLOW}${BOLD}[INFO] Config file not found. Creating a new one with reset IDs.${RESET}"
+        # Directly use fix_storage_json which creates the file
+        fix_storage_json
+        return $? # Return status of fix_storage_json
     fi
 
     # Check if we have write permission
+    local needs_sudo_check=false
     if [ ! -w "$CONFIG_FILE" ]; then
-        print_text "${RED}${BOLD}[ERROR] No write permission for $CONFIG_FILE${RESET}"
-        print_text "${YELLOW}${BOLD}You may need to run this command with sudo or change file permissions.${RESET}"
-        return 1
+         if [ "$EUID" -eq 0 ]; then
+              # Root doesn't have direct write access? Check ownership.
+              local file_owner=$(stat -c '%U' "$CONFIG_FILE")
+              if [ "$file_owner" != "root" ]; then
+                   print_text "${YELLOW}${BOLD}[WARNING] Config file is not owned by root. Trying to proceed...${RESET}"
+                   # We might still be able to write via sudo's privileges
+              else
+                    print_text "${RED}${BOLD}[ERROR] Root user cannot write to $CONFIG_FILE. Check permissions.${RESET}"
+                    return 1
+              fi
+         else
+              # Regular user without write access
+              print_text "${RED}${BOLD}[ERROR] No write permission for $CONFIG_FILE${RESET}"
+              print_text "${YELLOW}${BOLD}You may need to run this command with sudo ('sudo $0 -r') or change file permissions ('chmod u+w $CONFIG_FILE').${RESET}"
+              return 1
+         fi
+         needs_sudo_check=true # Need sudo for modification attempts
     fi
 
     print_text "${BLUE}${BOLD}[INFO] Reading current telemetry IDs...${RESET}"
 
-    # Try a special direct method for the specific storage.json format
-    if grep -q "Downloads" "$CONFIG_FILE"; then
-        print_text "${YELLOW}${BOLD}[INFO] Using specialized method for storage.json${RESET}"
-        fix_storage_json
-        return 0
+    # Use a temporary file for modification attempts
+    local tmp_file=$(mktemp)
+    cp "$CONFIG_FILE" "$tmp_file"
+
+    # Try a special direct method for the specific storage.json format first as it's safer
+    # Check if it has the specific keys we expect fix_storage_json to create
+    if grep -q '"backupWorkspaces"' "$tmp_file" && grep -q '"profileAssociations"' "$tmp_file" && grep -q '"windowsState"' "$tmp_file"; then
+        print_text "${YELLOW}${BOLD}[INFO] Config file structure looks standard. Using overwrite method.${RESET}"
+        fix_storage_json # This handles backup and permissions
+        rm -f "$tmp_file" # Clean up temp file
+        return $?
     fi
 
+    # If not the standard structure, attempt modification
+    print_text "${YELLOW}${BOLD}[INFO] Config file structure differs. Attempting modification...${RESET}"
+
     # Create backup of original file - only if no backup already exists
-    if [ -f "$CONFIG_FILE" ] && [ ! -f "${CONFIG_FILE}.bak" ] && [ ! -f "${CONFIG_FILE}.original" ]; then
+    if [ ! -f "${CONFIG_FILE}.bak" ] && [ ! -f "${CONFIG_FILE}.original" ]; then
         print_text "${YELLOW}${BOLD}[INFO] Creating backup of original file...${RESET}"
         cp "$CONFIG_FILE" "${CONFIG_FILE}.bak" 2>/dev/null || true
 
         # Fix backup file ownership if running as root
         if [ "$SUDO_USER" ] && [ "$EUID" -eq 0 ]; then
-            chown $SUDO_USER:$(id -gn $SUDO_USER) "${CONFIG_FILE}.bak" 2>/dev/null || true
+            chown "$SUDO_USER:$(id -gn "$SUDO_USER")" "${CONFIG_FILE}.bak" 2>/dev/null || true
         fi
     elif [ -f "${CONFIG_FILE}.bak" ] || [ -f "${CONFIG_FILE}.original" ]; then
         print_text "${YELLOW}${BOLD}[INFO] Backup already exists, skipping backup creation...${RESET}"
@@ -1018,8 +1113,8 @@ reset_request_ids() {
     local new_mac_id=$(generate_hex_string 64)
     local new_device_id=$(generate_uuid)
 
-    # Read original file
-    local file_content=$(cat "$CONFIG_FILE")
+    # Read original file content again for display
+    local file_content=$(cat "$tmp_file")
 
     # Extract current IDs using grep and sed
     local current_machine_id=$(echo "$file_content" | grep -o '"telemetry.machineId"[^"]*"[^"]*"' | sed 's/"telemetry.machineId".*: *"\([^"]*\)".*/\1/' | tr -d '\n ')
@@ -1027,171 +1122,141 @@ reset_request_ids() {
     local current_device_id=$(echo "$file_content" | grep -o '"telemetry.devDeviceId"[^"]*"[^"]*"' | sed 's/"telemetry.devDeviceId".*: *"\([^"]*\)".*/\1/' | tr -d '\n ,')
 
     # Use sed to replace the values - handle multiline and preserve structure
-    print_text "${BLUE}${BOLD}[INFO] Updating telemetry IDs...${RESET}"
+    print_text "${BLUE}${BOLD}[INFO] Updating telemetry IDs in temporary file...${RESET}"
 
-    # Create a temporary file for processing
-    local tmp_file=$(mktemp)
+    # Use different delimiters for sed to avoid issues with slashes in IDs/paths
+    sed -i.sedbak "s|\(\"telemetry.machineId\": *\)\"[^\"]*\"|\1\"$new_machine_id\"|g" "$tmp_file"
+    sed -i.sedbak "s|\(\"telemetry.macMachineId\": *\)\"[^\"]*\"|\1\"$new_mac_id\"|g" "$tmp_file"
+    sed -i.sedbak "s|\(\"telemetry.devDeviceId\": *\)\"[^\"]*\"|\1\"$new_device_id\"|g" "$tmp_file"
+    rm -f "$tmp_file.sedbak" 2>/dev/null
 
-    # If jq is available, use it for safer JSON manipulation
+    # Add keys if they don't exist (basic attempt, might break JSON if file is complex)
+    if ! grep -q '"telemetry.machineId"' "$tmp_file"; then
+         # Add near the beginning, assuming simple JSON object
+         sed -i '2i\ \ "telemetry.machineId": "'$new_machine_id'",' "$tmp_file"
+    fi
+     if ! grep -q '"telemetry.macMachineId"' "$tmp_file"; then
+         sed -i '2i\ \ "telemetry.macMachineId": "'$new_mac_id'",' "$tmp_file"
+    fi
+     if ! grep -q '"telemetry.devDeviceId"' "$tmp_file"; then
+         sed -i '2i\ \ "telemetry.devDeviceId": "'$new_device_id'",' "$tmp_file"
+         # Attempt to remove trailing comma if we added the last key
+         sed -i '$ s/,$//' "$tmp_file"
+    fi
+
+
+    # Verify the temporary file is valid JSON before overwriting
+    local json_valid=false
     if command -v jq >/dev/null 2>&1; then
-        # First fix any issues with the JSON format
-        # Replace line breaks and fix missing quotes in the original file
-        cat "$CONFIG_FILE" | tr -d '\n' | sed 's/\([a-f0-9]*\)"/\1"/g' > "$tmp_file"
-
-        # Now use jq to update the values
-        jq --arg mid "$new_machine_id" --arg mmid "$new_mac_id" --arg did "$new_device_id" \
-           '.["telemetry.machineId"] = $mid | .["telemetry.macMachineId"] = $mmid | .["telemetry.devDeviceId"] = $did' \
-           "$tmp_file" > "${tmp_file}.new"
-
-        if [ -s "${tmp_file}.new" ]; then
-            cat "${tmp_file}.new" > "$CONFIG_FILE"
-            rm -f "${tmp_file}.new"
-        else
-            print_text "${RED}${BOLD}[ERROR] JSON processing failed with jq.${RESET}"
+        if jq '.' "$tmp_file" > /dev/null 2>&1; then
+            json_valid=true
+        fi
+    elif command -v python3 >/dev/null 2>&1; then
+        if python3 -c "import json; json.load(open('$tmp_file'))" > /dev/null 2>&1; then
+            json_valid=true
         fi
     else
-        # Manual method if jq is not available
-        # Fix JSON format issues first
-        cat "$CONFIG_FILE" | tr -d '\n' | sed 's/\([a-f0-9]*\)"/\1"/g' > "$tmp_file"
+        print_text "${YELLOW}${BOLD}[WARNING] Cannot validate JSON structure. Proceeding with potentially invalid file.${RESET}"
+        json_valid=true # Cannot verify, assume ok and proceed carefully
+    fi
 
-        # Replace the telemetry IDs
-        sed -i.sedbak "s|\"telemetry.machineId\": *\"[^\"]*\"|\"telemetry.machineId\": \"$new_machine_id\"|g" "$tmp_file"
-        sed -i.sedbak "s|\"telemetry.macMachineId\": *\"[^\"]*\"|\"telemetry.macMachineId\": \"$new_mac_id\"|g" "$tmp_file"
-        sed -i.sedbak "s|\"telemetry.devDeviceId\": *\"[^\"]*\"|\"telemetry.devDeviceId\": \"$new_device_id\"|g" "$tmp_file"
 
-        # Add proper formatting to make the JSON readable
-        if command -v python3 >/dev/null 2>&1; then
-            python3 -c "
-import json
-try:
-    with open('$tmp_file', 'r') as f:
-        data = json.load(f)
-    with open('$CONFIG_FILE', 'w') as f:
-        json.dump(data, f, indent=2)
-    print('Successfully formatted JSON')
-except Exception as e:
-    print(f'Error: {str(e)}')
-" >/dev/null 2>&1 || {
-                # If python fails, just use the sed-processed file
-                cat "$tmp_file" > "$CONFIG_FILE"
+    local success=false
+    if [ "$json_valid" = true ]; then
+        # Overwrite original file
+        print_text "${BLUE}${BOLD}[INFO] Applying changes...${RESET}"
+        # Use cat and redirection, potentially with sudo
+        if [ "$needs_sudo_check" = true ] || [ "$EUID" -eq 0 ]; then
+            cat "$tmp_file" | sudo tee "$CONFIG_FILE" > /dev/null || {
+                 print_text "${RED}${BOLD}[ERROR] Failed to write changes to $CONFIG_FILE even with sudo.${RESET}"
+                 rm -f "$tmp_file"
+                 return 1
             }
+            # Fix ownership after tee with sudo
+             if [ "$SUDO_USER" ]; then
+                 sudo chown "$SUDO_USER:$(id -gn "$SUDO_USER")" "$CONFIG_FILE"
+             fi
+
         else
-            # Without python, just use the sed-processed file
-            cat "$tmp_file" > "$CONFIG_FILE"
+            cat "$tmp_file" > "$CONFIG_FILE" || {
+                 print_text "${RED}${BOLD}[ERROR] Failed to write changes to $CONFIG_FILE.${RESET}"
+                 rm -f "$tmp_file"
+                 return 1
+            }
         fi
-    fi
-
-    rm -f "$tmp_file" "$tmp_file.sedbak" 2>/dev/null
-
-    # Verify the values were updated
-    if [ -f "$CONFIG_FILE" ]; then
-        local updated_content=$(cat "$CONFIG_FILE")
-        local updated_machine_id=$(echo "$updated_content" | grep -o '"telemetry.machineId"[^"]*"[^"]*"' | sed 's/"telemetry.machineId".*: *"\([^"]*\)".*/\1/' | tr -d '\n ')
-        local updated_mac_id=$(echo "$updated_content" | grep -o '"telemetry.macMachineId"[^"]*"[^"]*"' | sed 's/"telemetry.macMachineId".*: *"\([^"]*\)".*/\1/' | tr -d '\n ')
-        local updated_device_id=$(echo "$updated_content" | grep -o '"telemetry.devDeviceId"[^"]*"[^"]*"' | sed 's/"telemetry.devDeviceId".*: *"\([^"]*\)".*/\1/' | tr -d '\n ,')
-
-        local success=true
-        if [ -z "$updated_machine_id" ] || [ "$updated_machine_id" != "$new_machine_id" ]; then
-            success=false
-        fi
-        if [ -z "$updated_mac_id" ] || [ "$updated_mac_id" != "$new_mac_id" ]; then
-            success=false
-        fi
-        if [ -z "$updated_device_id" ] || [ "$updated_device_id" != "$new_device_id" ]; then
-            success=false
-        fi
-
-        # Last resort - if all else fails, create a minimal JSON with just the telemetry IDs
-        if [ "$success" = false ]; then
-            print_text "${YELLOW}${BOLD}[WARNING] Failed to update IDs while preserving other settings.${RESET}"
-            print_text "${YELLOW}${BOLD}Using fallback method with minimal settings.${RESET}"
-
-            # Create minimal JSON with just the telemetry IDs
-            cat > "$CONFIG_FILE" << EOF
-{
-  "telemetry.machineId": "$new_machine_id",
-  "telemetry.macMachineId": "$new_mac_id",
-  "telemetry.devDeviceId": "$new_device_id"
-}
-EOF
-
-            print_text "${YELLOW}${BOLD}[WARNING] Other settings may have been lost.${RESET}"
-
-            # Fix permissions if running as root
-            if [ "$SUDO_USER" ] && [ "$EUID" -eq 0 ]; then
-                chown $SUDO_USER:$(id -gn $SUDO_USER) "$CONFIG_FILE"
-                print_text "${YELLOW}${BOLD}[INFO] Fixed file ownership for regular user.${RESET}"
-            fi
-
-            # Update message to reflect whether a new backup was created or an existing one exists
-            if [ -f "${CONFIG_FILE}.bak" ]; then
-                if [ "$(find "${CONFIG_FILE}.bak" -mmin -2)" ]; then
-                    print_text "${YELLOW}${BOLD}A backup of your original file was saved to ${CONFIG_FILE}.bak${RESET}"
-                else
-                    print_text "${YELLOW}${BOLD}Your original settings can be found in the existing backup at ${CONFIG_FILE}.bak${RESET}"
-                fi
-            elif [ -f "${CONFIG_FILE}.original" ]; then
-                print_text "${YELLOW}${BOLD}Your original settings can be found in the backup at ${CONFIG_FILE}.original${RESET}"
-            fi
-
-            success=true
-        fi
-
-        # Display results
-        echo
-        if [ "$success" = true ]; then
-            print_text "${GREEN}${BOLD}✅ Telemetry IDs have been reset!${RESET}"
-        else
-            print_text "${RED}${BOLD}❌ Failed to reset telemetry IDs.${RESET}"
-        fi
-
-        echo
-        print_text "${CYAN}${BOLD}Old Values:${RESET}"
-        print_text "${YELLOW}Machine ID:    ${RESET}${current_machine_id:-[Not Found]}"
-        print_text "${YELLOW}Mac ID:        ${RESET}${current_mac_id:-[Not Found]}"
-        print_text "${YELLOW}Device ID:     ${RESET}${current_device_id:-[Not Found]}"
-        echo
-        print_text "${CYAN}${BOLD}New Values:${RESET}"
-        print_text "${GREEN}Machine ID:    ${RESET}${new_machine_id}"
-        print_text "${GREEN}Mac ID:        ${RESET}${new_mac_id}"
-        print_text "${GREEN}Device ID:     ${RESET}${new_device_id}"
-        echo
-
-        print_text "${YELLOW}Backup saved to: ${CONFIG_FILE}.bak${RESET}"
-        print_text "${GREEN}${BOLD}Please restart Cursor for changes to take effect.${RESET}"
-
-        local reset_content=(
-            "${MAGENTA}${BOLD}REQUEST IDs RESET COMPLETE${RESET}"
-        )
-        print_box "${reset_content[@]}"
+        success=true
     else
-        print_text "${RED}${BOLD}[ERROR] Configuration file disappeared during processing.${RESET}"
+        print_text "${RED}${BOLD}[ERROR] Modification resulted in invalid JSON. Changes not applied.${RESET}"
+        print_text "${YELLOW}${BOLD}Your original file is preserved.${RESET}"
         if [ -f "${CONFIG_FILE}.bak" ]; then
-            print_text "${YELLOW}${BOLD}Restoring backup...${RESET}"
-            cp "${CONFIG_FILE}.bak" "$CONFIG_FILE"
+            print_text "${YELLOW}A backup was created at: ${CONFIG_FILE}.bak${RESET}"
         fi
-        return 1
+        success=false
     fi
+
+    rm -f "$tmp_file" # Clean up temp file
+
+    # Display results
+    echo
+    if [ "$success" = true ]; then
+        print_text "${GREEN}${BOLD}✅ Telemetry IDs have been reset!${RESET}"
+    else
+        print_text "${RED}${BOLD}❌ Failed to reset telemetry IDs.${RESET}"
+    fi
+
+    echo
+    print_text "${CYAN}${BOLD}Old Values (approximate):${RESET}"
+    print_text "${YELLOW}Machine ID:    ${RESET}${current_machine_id:-[Not Found]}"
+    print_text "${YELLOW}Mac ID:        ${RESET}${current_mac_id:-[Not Found]}"
+    print_text "${YELLOW}Device ID:     ${RESET}${current_device_id:-[Not Found]}"
+    echo
+    print_text "${CYAN}${BOLD}New Values:${RESET}"
+    print_text "${GREEN}Machine ID:    ${RESET}${new_machine_id}"
+    print_text "${GREEN}Mac ID:        ${RESET}${new_mac_id}"
+    print_text "${GREEN}Device ID:     ${RESET}${new_device_id}"
+    echo
+
+    if [ -f "${CONFIG_FILE}.bak" ]; then
+        print_text "${YELLOW}Backup saved to: ${CONFIG_FILE}.bak${RESET}"
+    fi
+
+    if [ "$success" = true ]; then
+        print_text "${GREEN}${BOLD}Please restart Cursor for changes to take effect.${RESET}"
+    fi
+
+    local reset_content=(
+        "${MAGENTA}${BOLD}REQUEST IDs RESET COMPLETE${RESET}"
+    )
+    print_box "${reset_content[@]}"
+
+    # Return success/failure based on whether changes were applied
+     if [ "$success" = true ]; then return 0; else return 1; fi
+
 }
+
 
 # Function to display status table
 display_status_table() {
     # Get installed version if available
     local installed_version="Not installed yet"
     local full_installed_version=""
-    # FIX: Check for the specific "installed" status.
-    if dpkg -s cursor 2>/dev/null | grep -q "Status: install ok installed"; then
+    # Check for the specific "installed" status.
+    if dpkg -s cursor 2>/dev/null | grep -q "^Status: install ok installed"; then
         full_installed_version=$(dpkg -s cursor | grep '^Version:' | awk '{ print $2 }')
-        # FIX: Extract only the base version number (before the hyphen)
+        # Extract only the base version number (before the hyphen)
         installed_version=$(echo "$full_installed_version" | cut -d'-' -f1)
     fi
 
     # Fetch latest version
-    if [[ -z "$APP_VERSION" || "$APP_VERSION" == "0.0.0" ]]; then
-        fetch_download_urls > /dev/null 2>&1
+    # Only fetch if APP_VERSION hasn't been set yet or failed previously
+    if [[ "$APP_VERSION" == "0.0.0" ]]; then
+        fetch_download_urls > /dev/null 2>&1 || true # Try to fetch, ignore errors for display
     fi
 
     local latest_version="$APP_VERSION"
+    # If fetching failed, show placeholder
+    [[ "$latest_version" == "0.0.0" ]] && latest_version="[Fetching failed]"
+
 
     # Set table dimensions and styles
     local name="Cursor AI Editor"
@@ -1265,6 +1330,7 @@ display_status_table() {
     name_row+="${CYAN}${BOLD}║${RESET} ${GREEN}$name${RESET}"
     local value_padding=$((col2_width - ${#name} - 1))
     for ((i=0; i<value_padding; i++)); do
+        value_padding=$(( value_padding < 0 ? 0 : value_padding )) # Ensure not negative
         name_row+=" "
     done
     name_row+="${CYAN}${BOLD}║${RESET}"
@@ -1286,6 +1352,7 @@ display_status_table() {
 
     installed_row+="${CYAN}${BOLD}║${RESET} ${version_color}$installed_version${RESET}"
     local value_padding=$((col2_width - ${#installed_version} - 1))
+    value_padding=$(( value_padding < 0 ? 0 : value_padding )) # Ensure not negative
     for ((i=0; i<value_padding; i++)); do
         installed_row+=" "
     done
@@ -1301,6 +1368,7 @@ display_status_table() {
     done
     latest_row+="${CYAN}${BOLD}║${RESET} ${YELLOW}$latest_version${RESET}"
     local value_padding=$((col2_width - ${#latest_version} - 1))
+     value_padding=$(( value_padding < 0 ? 0 : value_padding )) # Ensure not negative
     for ((i=0; i<value_padding; i++)); do
         latest_row+=" "
     done
@@ -1312,18 +1380,13 @@ display_status_table() {
     echo
 }
 
+
 # Process command line arguments
 if [[ $# -gt 0 ]]; then
     case "$1" in
         -r|--reset-ids)
             # Reset IDs doesn't necessarily need root access
-            if [ -f "$CONFIG_FILE" ] && [ ! -w "$CONFIG_FILE" ]; then
-                print_text "${RED}${BOLD}[ERROR] No write permission for the Cursor config file.${RESET}"
-                print_text "${YELLOW}${BOLD}You may need to run with sudo:${RESET} sudo $0 $1"
-                print_text "${YELLOW}Or change permissions:${RESET} chmod u+w $CONFIG_FILE"
-                exit 1
-            fi
-            reset_request_ids
+            reset_request_ids # Let the function handle permission checks/prompts
             ask_main_menu
             ;;
         *)
@@ -1332,7 +1395,6 @@ if [[ $# -gt 0 ]]; then
 
             case "$1" in
                 -i|--install)
-                    # Call the install_cursor function which handles dependency checks and installation
                     install_cursor
                     ask_main_menu
                     ;;
@@ -1362,10 +1424,10 @@ if [[ $# -gt 0 ]]; then
     esac
 fi
 
-# Fetch the latest version information at startup
+# Fetch the latest version information at startup (silently)
 fetch_download_urls > /dev/null 2>&1 || true
 
-# Main menu
+# Main menu loop
 while true; do
     display_header
 
@@ -1391,19 +1453,18 @@ while true; do
         1|2|3)
             # Options that require root access
             if ! check_root; then
-                continue
+                continue # Go back to menu if root check fails
             fi
 
             # Check if it's a debian system
             if ! check_deb_system; then
                 print_text "${YELLOW}Press Enter to return to the main menu...${RESET}"
                 read -r
-                continue
+                continue # Go back to menu if not Debian
             fi
 
             case "$choice" in
                 1)
-                    # Call the install_cursor function which handles dependency checks and installation
                     install_cursor
                     ask_main_menu
                     ;;
@@ -1418,18 +1479,7 @@ while true; do
             esac
             ;;
         4)
-            # Reset Request ID does not need root
-            # But it needs write access to the config file
-            if [ -f "$CONFIG_FILE" ] && [ ! -w "$CONFIG_FILE" ]; then
-                print_text "${RED}${BOLD}[ERROR] No write permission for the Cursor config file.${RESET}"
-                print_text "${YELLOW}${BOLD}You may need to run with sudo:${RESET} sudo $0"
-                print_text "${YELLOW}Or change permissions:${RESET} chmod u+w $CONFIG_FILE"
-                echo
-                print_text "${YELLOW}Press Enter to continue...${RESET}"
-                read -r
-                continue
-            fi
-
+            # Reset Request ID handles its own permission checks/prompts
             reset_request_ids
             ask_main_menu
             ;;
@@ -1452,7 +1502,7 @@ while true; do
             echo -e "${RED}${BOLD}[ERROR] Invalid option!${RESET}"
             echo -e "${YELLOW}Press Enter to continue...${RESET}"
             echo -n ""
-            read -r
+            read -r # Wait for user input before showing menu again
             ;;
     esac
 done
