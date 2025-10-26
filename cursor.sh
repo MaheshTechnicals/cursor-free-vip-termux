@@ -4,7 +4,7 @@
 #                 🚀 Cursor AI Editor Installer & Uninstaller 🚀                 #
 #                                                                              #
 #                        ✨ Author: Mahesh Technicals ✨                         #
-#                        🌟 Version: 3.2 (DEB Edition) 🌟                       #
+#                        🌟 Version: 3.3 (DEB Edition) 🌟                       #
 #                📌 Modern & Stylish UI with Error Handling                #
 #                                                                              #
 ################################################################################
@@ -34,7 +34,6 @@ else
 fi
 
 # Paths are now managed by the .deb package
-# Removed: INSTALL_DIR, DESKTOP_FILE, SYMLINK_PATH
 TEMP_DIR="/tmp/cursor-installer"
 CONFIG_FILE="$ACTUAL_HOME/.config/Cursor/User/globalStorage/storage.json"
 
@@ -291,7 +290,7 @@ display_header() {
         "${CYAN}${BOLD}Installation & Management${RESET}"
         ""
         "${CYAN}${BOLD}by Mahesh Technicals${RESET}"
-        "${CYAN}${BOLD}Version 3.2 (DEB Edition)${RESET}"
+        "${CYAN}${BOLD}Version 3.3 (DEB Edition)${RESET}"
         ""
     )
     
@@ -319,7 +318,9 @@ cleanup() {
 
 # Function to check if Cursor is already installed
 check_installation() {
-    if dpkg -s cursor &> /dev/null; then
+    # FIX: Check for the specific "installed" status.
+    # `dpkg -s` returns 0 even if package is 'removed' but not 'purged'.
+    if dpkg -s cursor 2>/dev/null | grep -q "Status: install ok installed"; then
         print_text "${YELLOW}${BOLD}[WARNING] Cursor is already installed.${RESET}"
         print_text "${YELLOW}${BOLD}[INFO] Would you like to reinstall? (y/n):${RESET} "
         echo -n ""
@@ -533,7 +534,7 @@ install_cursor() {
          $use_sudo dpkg -i ./Cursor.deb || $use_sudo apt --fix-broken install -y
          
          # Final check
-         if ! dpkg -s cursor &> /dev/null; then
+         if ! dpkg -s cursor 2>/dev/null | grep -q "Status: install ok installed"; then
             print_text "${RED}${BOLD}[ERROR] Installation failed. Please try installing manually.${RESET}"
             cleanup
             return 1
@@ -580,7 +581,8 @@ install_cursor() {
 
 # Function to check if Cursor is installed
 is_cursor_installed() {
-    if ! dpkg -s cursor &> /dev/null; then
+    # FIX: Check for the specific "installed" status.
+    if ! dpkg -s cursor 2>/dev/null | grep -q "Status: install ok installed"; then
         print_text "${RED}${BOLD}[ERROR] Cursor is not installed on this system.${RESET}"
         return 1
     fi
@@ -604,11 +606,23 @@ uninstall_cursor() {
     fi
 
     if ! is_cursor_installed; then
-        print_text "${YELLOW}${BOLD}[INFO] Nothing to uninstall.${RESET}"
-        return
+        # ADDED CHECK: See if it's 'removed' but not 'purged'
+        if dpkg -s cursor 2>/dev/null | grep -q "Status: deinstall ok config-files"; then
+            print_text "${YELLOW}${BOLD}[INFO] Remnants of a previous installation found.${RESET}"
+            print_text "${YELLOW}${BOLD}Do you want to purge these remnants? (y/n):${RESET} "
+            echo -n ""
+            read -r purge_choice
+            if [[ "$purge_choice" != "y" && "$purge_choice" != "Y" ]]; then
+                print_text "${YELLOW}${BOLD}[INFO] Cleanup aborted.${RESET}"
+                return
+            fi
+        else
+            # Truly not installed
+            return
+        fi
     else
         print_text "${RED}${BOLD}WARNING: Uninstalling Cursor AI Editor${RESET}"
-        print_text "${YELLOW}This will remove the 'cursor' package from your system.${RESET}"
+        print_text "${YELLOW}This will remove the 'cursor' package and its system configuration files.${RESET}" # Updated text
         print_text "${YELLOW}${BOLD}Are you sure you want to continue? (y/n):${RESET} "
         echo -n ""
         read -r choice
@@ -618,14 +632,15 @@ uninstall_cursor() {
         fi
     fi
     
-    print_text "${BLUE}${BOLD}[1/2]${RESET} ${YELLOW}Removing 'cursor' package...${RESET}"
-    $use_sudo apt remove -y cursor
+    print_text "${BLUE}${BOLD}[1/2]${RESET} ${YELLOW}Purging 'cursor' package...${RESET}" # Updated text
+    # FIX: Use 'purge' to remove package and config files
+    $use_sudo apt purge -y cursor
     
     print_text "${BLUE}${BOLD}[2/2]${RESET} ${YELLOW}Cleaning up dependencies...${RESET}"
     $use_sudo apt autoremove -y
     
     echo
-    print_text "${GREEN}${BOLD}Cursor AI Editor has been successfully removed!${RESET}"
+    print_text "${GREEN}${BOLD}Cursor AI Editor has been successfully purged!${RESET}" # Updated text
     
     local uninstall_content=(
         ""
@@ -663,7 +678,8 @@ update_cursor() {
     
     # Get installed version
     local installed_version=""
-    if dpkg -s cursor &> /dev/null; then
+    # FIX: Check for the specific "installed" status.
+    if dpkg -s cursor 2>/dev/null | grep -q "Status: install ok installed"; then
         installed_version=$(dpkg -s cursor | grep '^Version:' | awk '{ print $2 }')
     else
         installed_version="unknown"
@@ -711,7 +727,7 @@ show_about() {
     print_text "  • ${CYAN}Request ID reset for privacy${RESET}"
     echo
     print_text "${BOLD}Installer Information:${RESET}"
-    print_text "  • ${CYAN}Script version: 3.2 (DEB Edition)${RESET}"
+    print_text "  • ${CYAN}Script version: 3.3 (DEB Edition)${RESET}"
     print_text "  • ${CYAN}Author: Mahesh Technicals${RESET}"
     print_text "  • ${CYAN}App version: $APP_VERSION${RESET}"
     print_text "  • ${CYAN}Architecture: $ARCH${RESET}"
@@ -864,7 +880,7 @@ fix_storage_json() {
       "titleBarBackground": "#141414",
       "titleBarBorder": "rgba(255, 255, 255, 0.05)",
       "activityBarBackground": "#141414",
-      "sideBarBackground": "#141414",
+      "sideBarBackground": "#14141a",
       "sideBarBorder": "rgba(255, 255, 255, 0.05)",
       "statusBarBackground": "#141414",
       "statusBarBorder": "rgba(255, 255, 255, 0.05)",
@@ -1161,7 +1177,8 @@ EOF
 display_status_table() {
     # Get installed version if available
     local installed_version="Not installed yet"
-    if dpkg -s cursor &> /dev/null; then
+    # FIX: Check for the specific "installed" status.
+    if dpkg -s cursor 2>/dev/null | grep -q "Status: install ok installed"; then
         installed_version=$(dpkg -s cursor | grep '^Version:' | awk '{ print $2 }')
     fi
 
@@ -1356,7 +1373,7 @@ while true; do
     echo -e "1) ${GREEN}Install${RESET} Cursor AI Editor"
     echo -e "2) ${RED}Uninstall${RESET} Cursor AI Editor"
     echo -e "3) ${BLUE}Update${RESET} Cursor AI Editor"
-    echo -e "4) ${MAGENTA}Reset Request ID${RESET}"
+    echo -e "4. ${MAGENTA}Reset Request ID${RESET}"
     echo -e "5) ${YELLOW}About${RESET} Cursor AI Editor"
     echo -e "6) ${MAGENTA}Help${RESET}"
     echo -e "7) ${CYAN}Exit${RESET}"
