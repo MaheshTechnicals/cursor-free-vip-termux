@@ -4,7 +4,7 @@
 #                 🚀 Cursor AI Editor Installer & Uninstaller 🚀                 #
 #                                                                              #
 #                        ✨ Author: Mahesh Technicals ✨                         #
-#                        🌟 Version: 3.6 (DEB Edition) 🌟                       #
+#                        🌟 Version: 3.7 (DEB Edition) 🌟                       #
 #                📌 Modern & Stylish UI with Error Handling                #
 #                                                                              #
 ################################################################################
@@ -293,7 +293,7 @@ display_header() {
         "${CYAN}${BOLD}Installation & Management${RESET}"
         ""
         "${CYAN}${BOLD}by Mahesh Technicals${RESET}"
-        "${CYAN}${BOLD}Version 3.6 (DEB Edition)${RESET}"
+        "${CYAN}${BOLD}Version 3.7 (DEB Edition)${RESET}"
         ""
     )
 
@@ -535,15 +535,16 @@ install_cursor() {
     local desktop_file="/usr/share/applications/cursor.desktop"
 
     if [ -f "$desktop_file" ]; then
-        # Modify the main Exec line
-        $use_sudo sed -i 's|^Exec=/usr/share/cursor/cursor.*|Exec=/usr/share/cursor/cursor --no-sandbox %F|' "$desktop_file"
-
-        # Modify the "New Empty Window" action Exec line
-        $use_sudo sed -i 's|^Exec=/usr/share/cursor/cursor --new-window.*|Exec=/usr/share/cursor/cursor --no-sandbox --new-window %F|' "$desktop_file"
-
-        # Refresh the desktop database
-        $use_sudo update-desktop-database &> /dev/null || true
-        print_text "${GREEN}${BOLD}[SUCCESS] Desktop file patched.${RESET}"
+        # Modify the main Exec line, making sure not to add the flag multiple times
+        if ! grep -q -- '--no-sandbox' "$desktop_file"; then
+             $use_sudo sed -i 's|^Exec=/usr/share/cursor/cursor.*|Exec=/usr/share/cursor/cursor --no-sandbox %F|' "$desktop_file"
+             $use_sudo sed -i 's|^Exec=/usr/share/cursor/cursor --new-window.*|Exec=/usr/share/cursor/cursor --no-sandbox --new-window %F|' "$desktop_file"
+             # Refresh the desktop database
+             $use_sudo update-desktop-database &> /dev/null || true
+             print_text "${GREEN}${BOLD}[SUCCESS] Desktop file patched.${RESET}"
+        else
+             print_text "${YELLOW}${BOLD}[INFO] '--no-sandbox' flag already present in desktop file. Skipping patch.${RESET}"
+        fi
     else
         print_text "${YELLOW}${BOLD}[WARNING] Could not find $desktop_file to modify.${RESET}"
     fi
@@ -671,9 +672,12 @@ update_cursor() {
 
     # Get installed version
     local installed_version=""
+    local full_installed_version=""
     # FIX: Check for the specific "installed" status.
     if dpkg -s cursor 2>/dev/null | grep -q "Status: install ok installed"; then
-        installed_version=$(dpkg -s cursor | grep '^Version:' | awk '{ print $2 }')
+        full_installed_version=$(dpkg -s cursor | grep '^Version:' | awk '{ print $2 }')
+        # Extract only the base version number (before the hyphen)
+        installed_version=$(echo "$full_installed_version" | cut -d'-' -f1)
     else
         installed_version="unknown"
     fi
@@ -681,6 +685,7 @@ update_cursor() {
     print_text "${CYAN}${BOLD}[INFO] Installed version: ${BOLD}$installed_version${RESET}"
     print_text "${CYAN}${BOLD}[INFO] Latest version: ${BOLD}$APP_VERSION${RESET}"
 
+    # Compare base versions
     if [[ "$installed_version" == "$APP_VERSION" ]]; then
         print_text "${GREEN}${BOLD}[SUCCESS] You already have the latest version installed!${RESET}"
         print_text "${YELLOW}${BOLD}[INFO] Would you like to reinstall anyway? (y/n):${RESET} "
@@ -723,7 +728,7 @@ show_about() {
     print_text "  • ${CYAN}Request ID reset for privacy${RESET}"
     echo
     print_text "${BOLD}Installer Information:${RESET}"
-    print_text "  • ${CYAN}Script version: 3.6 (DEB Edition)${RESET}"
+    print_text "  • ${CYAN}Script version: 3.7 (DEB Edition)${RESET}"
     print_text "  • ${CYAN}Author: Mahesh Technicals${RESET}"
     print_text "  • ${CYAN}Latest App version: ${APP_VERSION:-[Fetching failed]}${RESET}" # Show version or fallback
     print_text "  • ${CYAN}Architecture: $ARCH${RESET}"
@@ -1173,9 +1178,12 @@ EOF
 display_status_table() {
     # Get installed version if available
     local installed_version="Not installed yet"
+    local full_installed_version=""
     # FIX: Check for the specific "installed" status.
     if dpkg -s cursor 2>/dev/null | grep -q "Status: install ok installed"; then
-        installed_version=$(dpkg -s cursor | grep '^Version:' | awk '{ print $2 }')
+        full_installed_version=$(dpkg -s cursor | grep '^Version:' | awk '{ print $2 }')
+        # FIX: Extract only the base version number (before the hyphen)
+        installed_version=$(echo "$full_installed_version" | cut -d'-' -f1)
     fi
 
     # Fetch latest version
