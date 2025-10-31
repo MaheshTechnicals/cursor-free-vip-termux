@@ -173,6 +173,16 @@ Version: 3.0
 
 ---
 
+## 💖 Support The Project
+
+If you find this tool helpful and want to support my work, please consider buying me a coffee!
+
+<a href="https://www.paypal.com/paypalme/Varma161" target="_blank"><img src="https://www.buymeacoffee.com/assets/img/custom_images/orange_img.png" alt="Buy Me A Coffee" style="height: 41px !important;width: 174px !important;box-shadow: 0px 3px 2px 0px rgba(190, 190, 190, 0.5) !important;-webkit-box-shadow: 0px 3px 2px 0px rgba(190, 190, 190, 0.5) !important;" ></a>
+
+- **UPI:** `maheshtechnicals@apl`
+
+---
+
 <p align="center">
   <sub>© 2025 Mahesh Technicals. All rights reserved.</sub>
 </p>
